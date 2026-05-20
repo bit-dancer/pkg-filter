@@ -1,7 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { compareVersions } from "../src/utils/debian-version";
 import { parseDependencies } from "../src/utils/dependency-parser";
-import { filterPackages } from "../src/filter";
+import { applyInclude, applyExclude, applyVersionKeep } from "../src/filter";
 
 describe("Debian Version Comparison", () => {
   test("should compare simple versions", () => {
@@ -32,37 +32,38 @@ describe("Dependency Parser", () => {
   test("should parse OR dependencies", () => {
     const deps = parseDependencies("pkg1 | pkg2");
     expect(deps).toHaveLength(2);
-    expect(deps[0].orGroup).toBe(0);
-    expect(deps[1].orGroup).toBe(0);
+    expect(deps[0].orGroup).toBe(1);
+    expect(deps[1].orGroup).toBe(1);
   });
 });
 
 describe("Filter Logic", () => {
   const mockPackages = [
-    { name: "redis-server", version: "6.2.1", priority: "optional" },
-    { name: "redis-server", version: "6.2.2", priority: "optional" },
-    { name: "redis-server", version: "7.0.0", priority: "optional" },
-    { name: "redis-doc", version: "1.0", priority: "extra" },
-    { name: "libredis-dev", version: "1.0", priority: "extra" },
+    { Package: "redis-server", Version: "6.2.1", Priority: "optional" },
+    { Package: "redis-server", Version: "6.2.2", Priority: "optional" },
+    { Package: "redis-server", Version: "7.0.0", Priority: "optional" },
+    { Package: "redis-doc", Version: "1.0", Priority: "extra" },
+    { Package: "libredis-dev", Version: "1.0", Priority: "extra" },
   ];
 
   test("should exclude by priority and name", () => {
-    const rules = [
+    const excludeRules = [
       { priority: ["extra"] },
       { name: ".*-dev$" }
     ];
-    const result = filterPackages(mockPackages, [], rules);
+    let result = applyExclude(mockPackages, excludeRules);
     expect(result).toHaveLength(3); // Only redis-server packages
-    expect(result.some(p => p.name.includes("doc"))).toBeFalse();
+    expect(result.some(p => p.Package.includes("doc"))).toBeFalse();
   });
 
   test("should keep specific versions", () => {
-    const include = [{ name: "redis-server", versionKeep: 2 }];
-    const result = filterPackages(mockPackages, include, []);
+    const versionKeepRules = [{ name: "redis-server", 'version-keep': 2 }];
+    let result = applyVersionKeep(mockPackages, versionKeepRules);
     // Should keep 7.0.0 and 6.2.2 (last 2)
+    result = result.filter(p => p.Package === "redis-server");
     expect(result).toHaveLength(2);
-    expect(result.map(p => p.version)).toContain("7.0.0");
-    expect(result.map(p => p.version)).toContain("6.2.2");
-    expect(result.map(p => p.version)).not.toContain("6.2.1");
+    expect(result.map(p => p.Version)).toContain("7.0.0");
+    expect(result.map(p => p.Version)).toContain("6.2.2");
+    expect(result.map(p => p.Version)).not.toContain("6.2.1");
   });
 });

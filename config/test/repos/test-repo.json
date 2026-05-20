@@ -1,0 +1,1 @@
+{"id":"test-repo","upstream":"http://example.com/repo","dist":"test","components":["main"],"arch":["amd64"],"include":[],"exclude":[],"versionKeep":{"count":0,"patterns":[]},"deps":{"follow-recommends":false,"follow-suggests":false,"repos":[]},"verifyChecksums":false,"gpgSign":false}

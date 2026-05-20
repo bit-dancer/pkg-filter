@@ -1,195 +1,61 @@
 /**
  * HTTP сервер для Debian Package Filter Proxy
+ * Модульная архитектура с разделением ответственности
  */
 
 import { RepoManager } from './repo-manager';
 import { serializePackages } from './parser';
-import { createHash } from 'crypto';
+import { getConfigPath, validateRepoId, normalizePath } from './utils/paths';
+import { logger } from './utils/logger';
 
-const repoManager = new RepoManager('./data/packages.db');
+// Создание менеджера репозиториев (пути берутся из переменных окружения или конфигов)
+const repoManager = new RepoManager();
 
-// Загрузить конфигурацию при старте
-async function initApp() {
+/**
+ * Инициализация приложения
+ */
+export async function initApp() {
   try {
-    await repoManager.loadConfig('./config.json');
-    console.log('Configuration loaded successfully');
+    await repoManager.loadConfig();
+    logger.info('Configuration loaded successfully');
   } catch (error) {
-    console.error('Failed to load config:', error);
+    logger.error('Failed to load config', { error: error instanceof Error ? error.message : String(error) });
+    throw error;
   }
 
   // Синхронизировать все репозитории при старте
   const repoIds = repoManager.getAllRepoIds();
-  console.log(`Starting initial sync for ${repoIds.length} repositories...`);
+  logger.info(`Starting initial sync for ${repoIds.length} repositories...`);
   
   for (const repoId of repoIds) {
     const result = await repoManager.syncRepo(repoId);
     if (result.success) {
-      console.log(`✓ ${repoId}: ${result.filteredCount} packages synced`);
+      logger.info(`${repoId}: ${result.filteredCount} packages synced`);
     } else {
-      console.error(`✗ ${repoId}: ${result.error}`);
+      logger.error(`${repoId}: ${result.error}`);
     }
   }
   
-  console.log('Initial sync completed');
+  logger.info('Initial sync completed');
 }
 
-// Запустить инициализацию при старте
-initApp().catch(console.error);
+/**
+ * Обработчик ошибок HTTP запросов
+ */
+function createErrorResponse(message: string, status: number = 500) {
+  return new Response(JSON.stringify({ error: message }), {
+    headers: { 'Content-Type': 'application/json' },
+    status
+  });
+}
 
-// Интервал для периодической синхронизации (30 минут)
-const SYNC_INTERVAL = 30 * 60 * 1000;
-setInterval(() => {
-  console.log('Running scheduled sync...');
-  initApp().catch(console.error);
-}, SYNC_INTERVAL);
+/**
+ * Парсер параметров пагинации
+ */
+function parsePaginationParams(url: URL): { limit: number; offset: number } {
+  const limit = Math.min(Math.max(1, parseInt(url.searchParams.get('limit') || '100')), 1000);
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0'));
+  return { limit, offset };
+}
 
-const server = Bun.serve({
-  port: process.env.PORT || 8080,
-  
-  async fetch(req, server) {
-    const url = new URL(req.url);
-    const path = url.pathname;
-    
-    // GET /r/:repo/sync - принудительная синхронизация
-    const syncMatch = path.match(/^\/r\/([^/]+)\/sync$/);
-    if (syncMatch && req.method === 'GET') {
-      const repoId = syncMatch[1];
-      const result = await repoManager.syncRepo(repoId);
-      
-      return new Response(JSON.stringify(result), {
-        headers: { 'Content-Type': 'application/json' },
-        status: result.success ? 200 : 500
-      });
-    }
-    
-    // GET /r/:repo/packages/list - список пакетов
-    const packagesListMatch = path.match(/^\/r\/([^/]+)\/packages\/list$/);
-    if (packagesListMatch && req.method === 'GET') {
-      const repoId = packagesListMatch[1];
-      const nameFilter = url.searchParams.get('name') || undefined;
-      
-      const packages = repoManager.getPackages(repoId, nameFilter);
-      
-      return new Response(JSON.stringify(packages, null, 2), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // GET /r/:repo/info - информация о репозитории
-    const infoMatch = path.match(/^\/r\/([^/]+)\/info$/);
-    if (infoMatch && req.method === 'GET') {
-      const repoId = infoMatch[1];
-      const info = repoManager.getRepoInfo(repoId);
-      
-      if (!info.config) {
-        return new Response(JSON.stringify({ error: 'Repository not found' }), {
-          headers: { 'Content-Type': 'application/json' },
-          status: 404
-        });
-      }
-      
-      return new Response(JSON.stringify(info), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // GET /r/:repo/logs - логи синхронизации
-    const logsMatch = path.match(/^\/r\/([^/]+)\/logs$/);
-    if (logsMatch && req.method === 'GET') {
-      const repoId = logsMatch[1];
-      const limit = parseInt(url.searchParams.get('limit') || '100');
-      const logs = repoManager.getSyncLogs(repoId, limit);
-      
-      return new Response(JSON.stringify(logs, null, 2), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // GET /r/:repo/dists/:dist/:component/binary-:arch/Packages(.gz)?
-    const packagesMatch = path.match(/^\/r\/([^/]+)\/dists\/([^/]+)\/([^/]+)\/binary-([^/]+)\/Packages(\.gz)?$/);
-    if (packagesMatch && req.method === 'GET') {
-      const [, repoId, dist, component, arch, isGzipped] = packagesMatch;
-      
-      // Получить пакеты из БД
-      const packages = repoManager.getPackages(repoId);
-      
-      // Отфильтровать по компоненту и архитектуре (упрощенно)
-      const filteredPackages = packages.filter(pkg => {
-        const pkgArch = pkg.Architecture || '';
-        // В реальном сценарии нужно также фильтровать по компоненту
-        return pkgArch === arch;
-      });
-      
-      // Сериализовать в формат Packages
-      const content = serializePackages(filteredPackages);
-      
-      if (isGzipped) {
-        // Сжать gzip
-        const uint8Array = new TextEncoder().encode(content);
-        const compressed = Bun.gzipSync(uint8Array);
-        
-        return new Response(compressed, {
-          headers: {
-            'Content-Type': 'application/x-gzip',
-            'Content-Encoding': 'gzip'
-          }
-        });
-      } else {
-        return new Response(content, {
-          headers: { 'Content-Type': 'text/plain' }
-        });
-      }
-    }
-    
-    // GET /r/:repo/pool/... - редирект на upstream
-    const poolMatch = path.match(/^\/r\/([^/]+)\/pool\/(.*)$/);
-    if (poolMatch && req.method === 'GET') {
-      const [, repoId, poolPath] = poolMatch;
-      
-      const config = repoManager.getRepoConfig(repoId);
-      if (!config) {
-        return new Response('Repository not found', { status: 404 });
-      }
-      
-      // Построить URL на upstream
-      const baseUrl = config.upstream.replace(/\/$/, '');
-      const redirectUrl = `${baseUrl}/pool/${poolPath}`;
-      
-      // Вернуть 301 Redirect
-      return new Response(null, {
-        status: 301,
-        headers: {
-          'Location': redirectUrl
-        }
-      });
-    }
-    
-    // GET /repos - список всех репозиториев
-    if (path === '/repos' && req.method === 'GET') {
-      const repoIds = repoManager.getAllRepoIds();
-      const repos = repoIds.map(id => {
-        const info = repoManager.getRepoInfo(id);
-        return {
-          id,
-          ...info
-        };
-      });
-      
-      return new Response(JSON.stringify(repos, null, 2), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // GET /health - проверка здоровья
-    if (path === '/health' && req.method === 'GET') {
-      return new Response(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // 404 для остальных запросов
-    return new Response('Not Found', { status: 404 });
-  }
-});
-
-console.log(`Server running at http://localhost:${server.port}`);
+export { repoManager, createErrorResponse, parsePaginationParams };
