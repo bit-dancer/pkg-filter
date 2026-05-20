@@ -1,77 +1,12 @@
-```
-# Dependencies
-node_modules/
-.bun/
-
-# Build outputs
-dist/
-build/
-target/
-
-# Logs
-*.log
-
-# Environment variables
+node_modules
+dist
+bun.lockb
 .env
-.env.local
-*.env.*
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-*.coverage
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg-info/
-.eggs/
-
-# Compiled files
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
+logs/*.log
+data/*.db
+data/*.sqlite
 *.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
-```
+*.zip
+.DS_Store
+coverage
+tmp

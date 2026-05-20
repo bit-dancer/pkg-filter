@@ -1,0 +1,22 @@
+{
+  "id": "redis-jammy",
+  "upstream": "https://packages.redis.io/deb",
+  "dist": "jammy",
+  "components": ["main"],
+  "arch": ["amd64"],
+  "include": [
+    { "name": "redis-server", "version": "^6\\.2\\..*", "versionKeep": 2 }
+  ],
+  "exclude": [],
+  "versionKeep": {
+    "count": 0,
+    "patterns": []
+  },
+  "deps": {
+    "follow-recommends": false,
+    "follow-suggests": false,
+    "repos": ["ubuntu-noble"]
+  },
+  "verifyChecksums": false,
+  "gpgSign": true
+}

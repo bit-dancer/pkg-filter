@@ -1,0 +1,25 @@
+{
+  "id": "ubuntu-noble",
+  "upstream": "http://ru.archive.ubuntu.com/ubuntu",
+  "dist": "noble",
+  "components": ["main", "restricted", "universe", "multiverse"],
+  "arch": ["amd64"],
+  "include": [],
+  "exclude": [
+    { "priority": ["optional", "extra"] },
+    { "name": ".*-dbg$" },
+    { "name": ".*-dev$" },
+    { "name": ".*-doc$" }
+  ],
+  "versionKeep": {
+    "count": 1,
+    "patterns": []
+  },
+  "deps": {
+    "follow-recommends": false,
+    "follow-suggests": false,
+    "repos": []
+  },
+  "verifyChecksums": false,
+  "gpgSign": false
+}
