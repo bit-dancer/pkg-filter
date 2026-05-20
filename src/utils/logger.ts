@@ -74,13 +74,55 @@ class Logger {
   }
 
   /**
-   * Логирование HTTP запроса
+   * Логирование HTTP запроса с расширенной информацией
    */
-  http(method: string, path: string, status: number, durationMs: number, context?: Record<string, unknown>) {
+  http(
+    method: string, 
+    path: string, 
+    status: number, 
+    durationMs: number, 
+    context?: { 
+      repoId?: string;
+      repoCount?: number;
+      total?: number;
+      gzipped?: boolean;
+      packageCount?: number;
+      logCount?: number;
+      redirectUrl?: string;
+      remoteAddress?: string;
+      userAgent?: string;
+      responseSize?: number;
+    }
+  ) {
     const logLevel = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
     this.log(logLevel, `${method} ${path} ${status} ${durationMs}ms`, {
       method,
       path,
+      status,
+      durationMs,
+      ...context
+    });
+  }
+  
+  /**
+   * Логирование HTTP запроса к upstream (синхронизация)
+   */
+  upstreamRequest(
+    url: string,
+    status: number,
+    durationMs: number,
+    context?: {
+      repoId?: string;
+      component?: string;
+      arch?: string;
+      proxy?: string;
+      timeout?: number;
+      error?: string;
+    }
+  ) {
+    const logLevel = status >= 500 || !status ? 'error' : status >= 400 ? 'warn' : 'debug';
+    this.log(logLevel, `UPSTREAM ${url} ${status || 'ERROR'} ${durationMs}ms`, {
+      url,
       status,
       durationMs,
       ...context

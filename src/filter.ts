@@ -14,6 +14,7 @@ export interface FilterRule {
 }
 
 export interface RepoConfig {
+  id?: string; // ID репозитория (опционально, может передаваться отдельно)
   upstream: string;
   dist: string;
   components: string[];
@@ -28,6 +29,9 @@ export interface RepoConfig {
   'verify-checksums'?: boolean;
   'allow-unresolved'?: boolean;
   'deps-repos'?: string[];
+  // Настройки подключения к upstream
+  'http-timeout'?: number; // Таймаут HTTP запросов в миллисекундах (по умолчанию 30000)
+  'http-proxy'?: string;   // Proxy URL (socks5://host:port или http://host:port)
 }
 
 /**
