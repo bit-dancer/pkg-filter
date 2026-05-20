@@ -6,6 +6,7 @@ import { Database } from 'bun:sqlite';
 import type { RepoConfig, FilterRule } from './filter';
 import { parsePackages, serializePackages, type PackageRecord } from './parser';
 import { applyInclude, applyExclude, applyVersionKeep, resolveDependencies } from './filter';
+import { getDbPath, getConfigPath, validateRepoId } from './utils/paths';
 
 export interface SyncResult {
   repoId: string;
@@ -21,9 +22,13 @@ export class RepoManager {
   private db: Database;
   private config: Map<string, RepoConfig>;
   private packageCache: Map<string, PackageRecord[]> = new Map();
+  private syncLock: Map<string, boolean> = new Map(); // Блокировка для предотвращения гонок
 
   constructor(dbPath: string = ':memory:') {
-    this.db = new Database(dbPath);
+    // Если путь не ':memory:', используем переданный путь напрямую (для обратной совместимости)
+    // или берем из переменных окружения если передан пустой путь
+    const actualPath = dbPath === ':memory:' ? dbPath : (dbPath.startsWith('.') ? dbPath : dbPath);
+    this.db = new Database(actualPath);
     this.config = new Map();
     this.initDb();
   }
@@ -85,23 +90,35 @@ export class RepoManager {
   /**
    * Загрузить конфигурацию из JSON файла
    */
-  async loadConfig(configPath: string) {
-    const configData = Bun.file(configPath);
-    const text = await configData.text();
-    const config: Record<string, RepoConfig> = JSON.parse(text);
-    
-    for (const [repoId, repoConfig] of Object.entries(config)) {
-      this.config.set(repoId, repoConfig);
+  async loadConfig(configPath?: string) {
+    const path = configPath || getConfigPath();
+    try {
+      const configData = Bun.file(path);
+      const text = await configData.text();
+      const config: Record<string, RepoConfig> = JSON.parse(text);
       
-      // Сохранить в БД
-      this.db.run(
-        'INSERT OR REPLACE INTO repos (id, config) VALUES (?, ?)',
-        repoId,
-        JSON.stringify(repoConfig)
-      );
+      for (const [repoId, repoConfig] of Object.entries(config)) {
+        // Валидировать repoId
+        if (!validateRepoId(repoId)) {
+          this.log('system', 'warn', `Skipping invalid repository ID: ${repoId}`);
+          continue;
+        }
+        
+        this.config.set(repoId, repoConfig);
+        
+        // Сохранить в БД
+        this.db.run(
+          'INSERT OR REPLACE INTO repos (id, config) VALUES (?, ?)',
+          repoId,
+          JSON.stringify(repoConfig)
+        );
+      }
+      
+      this.log('system', 'info', `Loaded ${this.config.size} repositories from config`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to load config from ${path}: ${errorMsg}`);
     }
-    
-    this.log('system', 'info', `Loaded ${this.config.size} repositories from config`);
   }
 
   /**
@@ -122,6 +139,36 @@ export class RepoManager {
    * Синхронизировать репозиторий
    */
   async syncRepo(repoId: string): Promise<SyncResult> {
+    // Проверка валидности repoId
+    if (!validateRepoId(repoId)) {
+      const error = `Invalid repository ID: ${repoId}`;
+      this.log(repoId, 'error', error);
+      return {
+        repoId,
+        success: false,
+        packagesCount: 0,
+        filteredCount: 0,
+        unresolvedDeps: [],
+        error,
+        timestamp: new Date()
+      };
+    }
+
+    // Проверка блокировки (защита от гонки данных)
+    if (this.syncLock.get(repoId)) {
+      const error = `Sync already in progress for ${repoId}`;
+      this.log(repoId, 'warn', error);
+      return {
+        repoId,
+        success: false,
+        packagesCount: 0,
+        filteredCount: 0,
+        unresolvedDeps: [],
+        error,
+        timestamp: new Date()
+      };
+    }
+
     const startTime = Date.now();
     const config = this.config.get(repoId);
     
@@ -140,6 +187,9 @@ export class RepoManager {
     }
 
     try {
+      // Установить блокировку
+      this.syncLock.set(repoId, true);
+      
       this.log(repoId, 'info', `Starting sync for ${repoId}`);
       
       // Скачать и распарсить Packages файлы
@@ -269,6 +319,9 @@ export class RepoManager {
         error: errorMsg,
         timestamp: new Date()
       };
+    } finally {
+      // Снять блокировку
+      this.syncLock.delete(repoId);
     }
   }
 
@@ -278,41 +331,23 @@ export class RepoManager {
   private async downloadPackages(config: RepoConfig): Promise<PackageRecord[]> {
     const allPackages: PackageRecord[] = [];
     
+    // Параллельная загрузка для каждого компонента и архитектуры
+    const fetchPromises: Promise<PackageRecord[]>[] = [];
+    
     for (const component of config.components) {
       for (const arch of config.arch) {
-        const baseUrl = config.upstream.replace(/\/$/, '');
-        const dist = config.dist;
-        
-        // Попробовать сжатый и несжатый варианты
-        const urls = [
-          `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages.gz`,
-          `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages`
-        ];
-        
-        for (const url of urls) {
-          try {
-            const response = await fetch(url);
-            if (!response.ok) continue;
-            
-            let content: string;
-            
-            if (url.endsWith('.gz')) {
-              const arrayBuffer = await response.arrayBuffer();
-              const uint8Array = new Uint8Array(arrayBuffer);
-              const decompressed = Bun.gunzipSync(uint8Array);
-              content = new TextDecoder().decode(decompressed);
-            } else {
-              content = await response.text();
-            }
-            
-            const packages = parsePackages(content);
-            allPackages.push(...packages);
-            break; // Успешно скачали, перейти к следующему
-          } catch (e) {
-            // Попробовать следующий URL
-            continue;
-          }
-        }
+        fetchPromises.push(this.fetchComponentPackages(config, component, arch));
+      }
+    }
+    
+    // Дождаться всех загрузок
+    const results = await Promise.allSettled(fetchPromises);
+    
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        allPackages.push(...result.value);
+      } else {
+        console.warn('Failed to fetch component:', result.reason);
       }
     }
     
@@ -320,20 +355,67 @@ export class RepoManager {
   }
 
   /**
+   * Скачать пакеты для конкретного компонента и архитектуры
+   */
+  private async fetchComponentPackages(config: RepoConfig, component: string, arch: string): Promise<PackageRecord[]> {
+    const baseUrl = config.upstream.replace(/\/$/, '');
+    const dist = config.dist;
+    
+    // Попробовать сжатый и несжатый варианты
+    const urls = [
+      `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages.gz`,
+      `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages`
+    ];
+    
+    for (const url of urls) {
+      try {
+        // Таймаут на запрос (30 секунд)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) continue;
+        
+        let content: string;
+        
+        if (url.endsWith('.gz')) {
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const decompressed = Bun.gunzipSync(uint8Array);
+          content = new TextDecoder().decode(decompressed);
+        } else {
+          content = await response.text();
+        }
+        
+        const packages = parsePackages(content);
+        return packages; // Успешно скачали, вернуть результат
+      } catch (e) {
+        // Попробовать следующий URL
+        if (e instanceof Error && e.name === 'AbortError') {
+          console.warn(`Request timeout for ${url}`);
+        }
+        continue;
+      }
+    }
+    
+    return []; // Ни один URL не сработал
+  }
+
+  /**
    * Сохранить пакеты в БД
    */
   private savePackages(repoId: string, packages: PackageRecord[]) {
-    // Очистить старые записи
-    this.db.run('DELETE FROM packages WHERE repo_id = ?', repoId);
-    
-    const insertStmt = this.db.prepare(`
-      INSERT INTO packages (repo_id, package_name, version, architecture, priority, section, depends, filename, size, sha256, data)
+    // Использовать INSERT OR REPLACE вместо DELETE + INSERT для атомарности и производительности
+    const upsertStmt = this.db.prepare(`
+      INSERT OR REPLACE INTO packages (repo_id, package_name, version, architecture, priority, section, depends, filename, size, sha256, data)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
-    const insertMany = this.db.transaction((pkgs: PackageRecord[]) => {
+    const upsertMany = this.db.transaction((pkgs: PackageRecord[]) => {
       for (const pkg of pkgs) {
-        insertStmt.run(
+        upsertStmt.run(
           repoId,
           pkg.Package || '',
           pkg.Version || '',
@@ -349,13 +431,19 @@ export class RepoManager {
       }
     });
     
-    insertMany(packages);
+    upsertMany(packages);
   }
 
   /**
    * Получить список пакетов репозитория
    */
   getPackages(repoId: string, nameFilter?: string): PackageRecord[] {
+    // Валидация repoId
+    if (!validateRepoId(repoId)) {
+      this.log(repoId, 'error', 'Invalid repository ID');
+      return [];
+    }
+
     let query = 'SELECT data FROM packages WHERE repo_id = ?';
     const params: any[] = [repoId];
     
@@ -364,26 +452,52 @@ export class RepoManager {
       params.push(`%${nameFilter}%`);
     }
     
-    const rows = this.db.query(query).all(...params) as { data: string }[];
-    return rows.map(row => JSON.parse(row.data));
+    try {
+      const rows = this.db.query(query).all(...params) as { data: string }[];
+      return rows.map(row => JSON.parse(row.data));
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.log(repoId, 'error', `Failed to get packages: ${errorMsg}`);
+      return [];
+    }
   }
 
   /**
    * Получить информацию о репозитории
    */
   getRepoInfo(repoId: string): { config: RepoConfig | undefined; lastSync: string | null; status: string | null; packagesCount: number } {
+    // Валидация repoId
+    if (!validateRepoId(repoId)) {
+      return {
+        config: undefined,
+        lastSync: null,
+        status: null,
+        packagesCount: 0
+      };
+    }
+
     const config = this.config.get(repoId);
     
-    const row = this.db.query('SELECT last_sync, sync_status FROM repos WHERE id = ?').get(repoId) as { last_sync: string; sync_status: string } | undefined;
-    
-    const countRow = this.db.query('SELECT COUNT(*) as count FROM packages WHERE repo_id = ?').get(repoId) as { count: number } | undefined;
-    
-    return {
-      config,
-      lastSync: row?.last_sync || null,
-      status: row?.sync_status || null,
-      packagesCount: countRow?.count || 0
-    };
+    try {
+      const row = this.db.query('SELECT last_sync, sync_status FROM repos WHERE id = ?').get(repoId) as { last_sync: string; sync_status: string } | undefined;
+      
+      const countRow = this.db.query('SELECT COUNT(*) as count FROM packages WHERE repo_id = ?').get(repoId) as { count: number } | undefined;
+      
+      return {
+        config,
+        lastSync: row?.last_sync || null,
+        status: row?.sync_status || null,
+        packagesCount: countRow?.count || 0
+      };
+    } catch (error) {
+      this.log(repoId, 'error', `Failed to get repo info: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        config,
+        lastSync: null,
+        status: null,
+        packagesCount: 0
+      };
+    }
   }
 
   /**
@@ -409,14 +523,39 @@ export class RepoManager {
    * Получить логи синхронизации
    */
   getSyncLogs(repoId: string, limit: number = 100): { timestamp: string; level: string; message: string }[] {
-    const rows = this.db.query(`
-      SELECT timestamp, level, message 
-      FROM sync_logs 
-      WHERE repo_id = ? 
-      ORDER BY timestamp DESC 
-      LIMIT ?
-    `).all(repoId, limit) as { timestamp: string; level: string; message: string }[];
+    // Валидация repoId
+    if (!validateRepoId(repoId)) {
+      return [];
+    }
+
+    // Валидация limit
+    const safeLimit = Math.min(Math.max(1, limit), 1000);
     
-    return rows;
+    try {
+      const rows = this.db.query(`
+        SELECT timestamp, level, message 
+        FROM sync_logs 
+        WHERE repo_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT ?
+      `).all(repoId, safeLimit) as { timestamp: string; level: string; message: string }[];
+      
+      return rows;
+    } catch (error) {
+      this.log(repoId, 'error', `Failed to get sync logs: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * Закрыть соединение с БД
+   */
+  close() {
+    try {
+      this.db.close();
+      console.log('Database connection closed');
+    } catch (error) {
+      console.error('Failed to close database:', error instanceof Error ? error.message : String(error));
+    }
   }
 }

@@ -42,12 +42,12 @@ function parseSingleDependency(str: string): Dependency | null {
 
   // Regex to match: Name [ (Op Version) ]
   // Handles spaces around operators loosely
-  const match = trimmed.match(/^([a-zA-Z0-9.+\-]+)\s*(?:\(\s*([><=]+)\s*([^)]+)\))?$/);
+  const match = trimmed.match(/^([a-zA-Z0-9.+-]+)\s*(?:\(\s*([><=]+)\s*([^)]+)\))?$/);
 
   if (!match) {
     // Fallback for complex cases or strict parsing failure
     // Just return name if version part is malformed
-    const nameMatch = trimmed.match(/^([a-zA-Z0-9.+\-]+)/);
+    const nameMatch = trimmed.match(/^([a-zA-Z0-9.+-]+)/);
     if (nameMatch) {
       return { name: nameMatch[1], orGroup: 0 };
     }

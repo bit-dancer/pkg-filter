@@ -1,0 +1,19 @@
+{
+  "test-repo": {
+    "upstream": "http://archive.ubuntu.com/ubuntu",
+    "dist": "focal",
+    "components": ["main"],
+    "arch": ["amd64"],
+    "include": [],
+    "exclude": [
+      { "name": ".*-dbg$" },
+      { "name": ".*-dev$" },
+      { "name": ".*-doc$" }
+    ],
+    "deps": {
+      "follow-recommends": false,
+      "follow-suggests": false
+    },
+    "allow-unresolved": true
+  }
+}

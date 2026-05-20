@@ -77,7 +77,7 @@ function compareUpstream(s1: string, s2: string): number {
     while (i < s1.length && isLetter(s1[i])) i++;
     while (j < s2.length && isLetter(s2[j])) j++;
 
-    const str1 = s1.substring(startI, i); // Actually we need to re-scan letters from previous pos
+    // const str1 = s1.substring(startI, i); // Actually we need to re-scan letters from previous pos
     // Correction: scan letters from current pos backwards? No, standard algo scans segments.
     // Let's implement the standard loop properly:
 
@@ -149,7 +149,8 @@ function compareUpstream(s1: string, s2: string): number {
   return 0;
 }
 
-function compareStringSegment(s1: string, s2: string, i: number, j: number): number {
+ 
+function compareStringSegment(_s1: string, _s2: string, _i: number, _j: number): number {
    // Handled inside the main loop above for simplicity
    return 0;
 }

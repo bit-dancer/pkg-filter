@@ -1,0 +1,1 @@
+{"test-repo":{"upstream":"http://archive.ubuntu.com/ubuntu","dist":"focal","components":["main"],"arch":["amd64"],"include":[{"name":"bash"}],"exclude":[],"deps":{"follow-recommends":false,"follow-suggests":false},"allow-unresolved":true}}
