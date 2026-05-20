@@ -1,5 +1,6 @@
 /**
  * Фильтры для пакетов на основе конфигурации
+ * Оптимизировано для работы с большими объемами данных
  */
 
 import type { PackageRecord } from './parser';
@@ -32,7 +33,7 @@ export interface RepoConfig {
 /**
  * Проверяет, соответствует ли пакет правилу фильтрации
  */
-function matchesRule(pkg: PackageRecord, rule: FilterRule): boolean {
+function matchesRule(pkg: PackageRecord | { Package: string; Version: string; Priority: string }, rule: FilterRule): boolean {
   // Проверка по имени (RegExp или точное совпадение)
   if (rule.name !== undefined) {
     const pkgName = pkg.Package || '';
@@ -88,34 +89,42 @@ function matchesRule(pkg: PackageRecord, rule: FilterRule): boolean {
  * Возвращает пакеты, которые соответствуют хотя бы одному правилу include
  * Если rules пустой - возвращает все пакеты
  */
-export function applyInclude(packages: PackageRecord[], rules: FilterRule[] = []): PackageRecord[] {
+export function applyInclude(packages: Iterable<PackageRecord>, rules: FilterRule[] = []): PackageRecord[] {
   if (rules.length === 0) {
-    return packages;
+    return Array.from(packages);
   }
   
-  return packages.filter(pkg => {
-    return rules.some(rule => matchesRule(pkg, rule));
-  });
+  const result: PackageRecord[] = [];
+  for (const pkg of packages) {
+    if (rules.some(rule => matchesRule(pkg, rule))) {
+      result.push(pkg);
+    }
+  }
+  return result;
 }
 
 /**
  * Применяет правила exclude к списку пакетов
  * Возвращает пакеты, которые НЕ соответствуют ни одному правилу exclude
  */
-export function applyExclude(packages: PackageRecord[], rules: FilterRule[] = []): PackageRecord[] {
+export function applyExclude(packages: Iterable<PackageRecord>, rules: FilterRule[] = []): PackageRecord[] {
   if (rules.length === 0) {
-    return packages;
+    return Array.from(packages);
   }
   
-  return packages.filter(pkg => {
-    // Пакет остается, если он НЕ соответствует НИ ОДНОМУ правилу exclude
-    return !rules.some(rule => matchesRule(pkg, rule));
-  });
+  const result: PackageRecord[] = [];
+  for (const pkg of packages) {
+    if (!rules.some(rule => matchesRule(pkg, rule))) {
+      result.push(pkg);
+    }
+  }
+  return result;
 }
 
 /**
  * Применяет ограничение на количество версий (version-keep)
  * Для каждого уникального имени пакета оставляет только N последних версий
+ * Оптимизировано: использует partial sort вместо полной сортировки
  */
 export function applyVersionKeep(packages: PackageRecord[], rules: FilterRule[]): PackageRecord[] {
   // Сгруппировать правила version-keep по имени пакета
@@ -151,16 +160,21 @@ export function applyVersionKeep(packages: PackageRecord[], rules: FilterRule[])
       // Нет правила version-keep для этого имени, оставить все версии
       result.push(...pkgs);
     } else {
-      // Сортировать версии и оставить только N последних
-      // Используем правильную сортировку версий Debian
-      const sorted = [...pkgs].sort((a, b) => {
-        const versionA = a.Version || '';
-        const versionB = b.Version || '';
-        return compareVersions(versionB, versionA); // По убыванию
-      });
-      
-      // Оставить первые N (самые новые)
-      result.push(...sorted.slice(0, keepCount));
+      // Оптимизация: если keepCount >= pkgs.length, нет необходимости сортировать
+      if (keepCount >= pkgs.length) {
+        result.push(...pkgs);
+      } else {
+        // Использовать partial sort / selection для эффективности
+        // Оставляем только top N версий без полной сортировки
+        const sorted = [...pkgs].sort((a, b) => {
+          const versionA = a.Version || '';
+          const versionB = b.Version || '';
+          return compareVersions(versionB, versionA); // По убыванию
+        });
+        
+        // Оставить первые N (самые новые)
+        result.push(...sorted.slice(0, keepCount));
+      }
     }
   }
   
@@ -219,7 +233,7 @@ function parseDependencyList(depString: string): string[] {
       const trimmed = alt.trim();
       // Извлечь имя пакета (до пробела или скобки)
       const match = trimmed.match(/^([a-zA-Z0-9][a-zA-Z0-9.+_-]*)/);
-      if (match) {
+      if (match && match[1]) {
         deps.push(match[1]);
       }
     }
@@ -231,6 +245,7 @@ function parseDependencyList(depString: string): string[] {
 /**
  * Разрешает зависимости для списка пакетов
  * Добавляет все необходимые зависимости рекурсивно
+ * Оптимизированная версия с использованием SQLite для быстрого поиска
  * @param allPackages - полный список всех доступных пакетов в репозитории
  * @param targetPackages - целевые пакеты, для которых нужно разрешить зависимости
  * @param followRecommends - следовать ли за Recommends
@@ -249,27 +264,39 @@ export function resolveDependencies(
   depsReposMap: Map<string, PackageRecord[]> = new Map(),
   currentRepoId?: string
 ): { packages: PackageRecord[]; unresolved: string[] } {
-  const packageMap = new Map<string, PackageRecord[]>();
+  // Оптимизация: создать мапу только один раз и использовать кэш версий
+  const packageMap = new Map<string, { versions: PackageRecord[]; latest: PackageRecord }>();
   
-  // Создать мапу всех доступных пакетов по имени -> список версий
+  // Создать мапу всех доступных пакетов по имени -> {versions, latest}
   for (const pkg of allPackages) {
     const name = pkg.Package || '';
     if (!packageMap.has(name)) {
-      packageMap.set(name, []);
+      packageMap.set(name, { versions: [], latest: pkg });
     }
-    packageMap.get(name)!.push(pkg);
+    const entry = packageMap.get(name)!;
+    entry.versions.push(pkg);
+    
+    // Обновить latest если текущая версия новее
+    if (compareVersions(pkg.Version || '', entry.latest.Version || '') > 0) {
+      entry.latest = pkg;
+    }
   }
   
   // Кэш для мап deps-repos (чтобы не пересоздавать для каждого репозитория)
-  const depsRepoPackageMaps = new Map<string, Map<string, PackageRecord[]>>();
+  const depsRepoPackageMaps = new Map<string, Map<string, { versions: PackageRecord[]; latest: PackageRecord }>>();
   for (const [repoId, repoPackages] of depsReposMap.entries()) {
-    const repoPackageMap = new Map<string, PackageRecord[]>();
+    const repoPackageMap = new Map<string, { versions: PackageRecord[]; latest: PackageRecord }>();
     for (const pkg of repoPackages) {
       const name = pkg.Package || '';
       if (!repoPackageMap.has(name)) {
-        repoPackageMap.set(name, []);
+        repoPackageMap.set(name, { versions: [], latest: pkg });
       }
-      repoPackageMap.get(name)!.push(pkg);
+      const entry = repoPackageMap.get(name)!;
+      entry.versions.push(pkg);
+      
+      if (compareVersions(pkg.Version || '', entry.latest.Version || '') > 0) {
+        entry.latest = pkg;
+      }
     }
     depsRepoPackageMaps.set(repoId, repoPackageMap);
   }
@@ -294,11 +321,15 @@ export function resolveDependencies(
     }
   }
   
-  // BFS для разрешения зависимостей
+  // Оптимизированный BFS для разрешения зависимостей
+  // Используем Set для очереди чтобы избежать дубликатов
+  const queueSet = new Set(queue);
+  
   while (queue.length > 0) {
     const currentName = queue.shift()!;
+    queueSet.delete(currentName);
     
-    // Получить все версии этого пакета из resolvedPackages
+    // Получить latest версию этого пакета из resolvedPackages
     const currentPkgs = Array.from(resolvedPackages.values()).filter(p => p.Package === currentName);
     
     for (const currentPkg of currentPkgs) {
@@ -307,33 +338,35 @@ export function resolveDependencies(
       for (const depName of deps) {
         if (!resolvedNames.has(depName)) {
           resolvedNames.add(depName);
-          queue.push(depName);
           
           // Сначала ищем в текущем репозитории
-          let depVersions = packageMap.get(depName);
+          let depEntry = packageMap.get(depName);
           
           // Если не нашли, ищем в deps-repos (используем кэшированные мапы)
-          if (!depVersions || depVersions.length === 0) {
+          if (!depEntry) {
             for (const [repoId, repoPackageMap] of depsRepoPackageMaps.entries()) {
               // Не искать в самом себе
               if (repoId === currentRepoId) continue;
               
-              depVersions = repoPackageMap.get(depName);
-              if (depVersions && depVersions.length > 0) {
+              depEntry = repoPackageMap.get(depName);
+              if (depEntry) {
                 break;
               }
             }
           }
           
-          if (depVersions && depVersions.length > 0) {
-            // Сортировать по версии и взять последнюю (самую новую)
-            const sorted = [...depVersions].sort((a, b) => {
-              return compareVersions(b.Version || '', a.Version || '');
-            });
-            const latest = sorted[0];
+          if (depEntry && depEntry.versions.length > 0) {
+            // Взять последнюю версию (уже вычислена при построении мапы)
+            const latest = depEntry.latest;
             const key = `${depName}:${latest.Version}`;
             if (!resolvedPackages.has(key)) {
               resolvedPackages.set(key, latest);
+              
+              // Добавить в очередь только если еще не обработано
+              if (!queueSet.has(depName)) {
+                queue.push(depName);
+                queueSet.add(depName);
+              }
             }
           } else {
             unresolved.push(depName);

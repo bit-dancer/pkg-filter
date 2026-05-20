@@ -6,6 +6,7 @@ import { initApp, repoManager, createErrorResponse, parsePaginationParams } from
 import { serializePackages } from './parser';
 import { validateRepoId, normalizePath } from './utils/paths';
 import { logger } from './utils/logger';
+import { getVersion } from './version';
 
 // Конфигурация сервера
 const port = parseInt(process.env.PORT || '8080');
@@ -55,6 +56,8 @@ async function gracefulShutdown(signal: string) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+logger.info(`Debian Package Filter Proxy Server ${getVersion()} starting...`);
 
 const server = Bun.serve({
   port: port,
