@@ -2,7 +2,7 @@
  * Version of the application
  * Updated automatically or manually to reflect current release
  */
-export const VERSION = '2.0.0';
+export const VERSION = '2.1.0';
 
 /**
  * Build metadata (optional, can be filled by CI/CD)

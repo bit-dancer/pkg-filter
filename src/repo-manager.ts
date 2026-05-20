@@ -21,12 +21,22 @@ export interface SyncResult {
   timestamp: Date;
 }
 
+export interface RepoSyncInfo {
+  lastSync: string | null;
+  status: string | null;
+  isSyncing: boolean;
+  duration?: number; // время последней синхронизации в мс
+  packagesCount: number;
+}
+
 export class RepoManager {
   private db: Database;
   private config: Map<string, RepoConfig>;
   private packageCache: Map<string, PackageRecord[]> = new Map();
   private syncLock: Map<string, boolean> = new Map(); // Блокировка для предотвращения гонок
   private cacheManager: CacheManager;
+  private syncStartTime: Map<string, number> = new Map(); // Время начала синхронизации для каждого репозитория
+  private lastSyncDuration: Map<string, number> = new Map(); // Длительность последней синхронизации
 
   constructor(dbPath: string = ':memory:') {
     // Если путь не ':memory:', используем переданный путь напрямую (для обратной совместимости)
@@ -225,6 +235,7 @@ export class RepoManager {
     }
 
     const startTime = Date.now();
+    this.syncStartTime.set(repoId, startTime); // Сохранить время начала синхронизации
     const config = this.config.get(repoId);
     
     if (!config) {
@@ -421,6 +432,11 @@ export class RepoManager {
     } finally {
       // Снять блокировку
       this.syncLock.delete(repoId);
+      
+      // Сохранить длительность синхронизации и очистить время начала
+      const duration = Date.now() - startTime;
+      this.lastSyncDuration.set(repoId, duration);
+      this.syncStartTime.delete(repoId);
     }
   }
 
@@ -892,6 +908,46 @@ export class RepoManager {
   }
 
   /**
+   * Получить расширенную информацию о синхронизации репозитория
+   */
+  getRepoSyncInfo(repoId: string): RepoSyncInfo {
+    // Валидация repoId
+    if (!validateRepoId(repoId)) {
+      return {
+        lastSync: null,
+        status: null,
+        isSyncing: false,
+        packagesCount: 0
+      };
+    }
+
+    const config = this.config.get(repoId);
+    const isSyncing = this.syncLock.get(repoId) || false;
+    
+    try {
+      const row = this.db.query('SELECT last_sync, sync_status FROM repos WHERE id = ?').get(repoId) as { last_sync: string; sync_status: string } | undefined;
+      
+      const countRow = this.db.query('SELECT COUNT(*) as count FROM packages WHERE repo_id = ?').get(repoId) as { count: number } | undefined;
+      
+      return {
+        lastSync: row?.last_sync || null,
+        status: row?.sync_status || null,
+        isSyncing,
+        duration: this.lastSyncDuration.get(repoId),
+        packagesCount: countRow?.count || 0
+      };
+    } catch (error) {
+      this.log(repoId, 'error', `Failed to get repo sync info: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        lastSync: null,
+        status: null,
+        isSyncing,
+        packagesCount: 0
+      };
+    }
+  }
+
+  /**
    * Получить зависимости пакета из БД (используя таблицу packages_depends)
    * Это намного быстрее чем парсить depends поле из packages таблицы
    */
@@ -1192,5 +1248,16 @@ export class RepoManager {
    */
   getCacheStats(): { totalFiles: number; totalSize: number; tempFiles: number } {
     return this.cacheManager.getStats();
+  }
+
+  /**
+   * Получить информацию о всех репозиториях для метрик
+   */
+  getAllReposSyncInfo(): Record<string, RepoSyncInfo> {
+    const result: Record<string, RepoSyncInfo> = {};
+    for (const repoId of this.getAllRepoIds()) {
+      result[repoId] = this.getRepoSyncInfo(repoId);
+    }
+    return result;
   }
 }

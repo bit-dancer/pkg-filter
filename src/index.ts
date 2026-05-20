@@ -5,7 +5,7 @@
 import { initApp, repoManager, createErrorResponse, parsePaginationParams } from './server';
 import { serializePackages } from './parser';
 import { validateRepoId, normalizePath } from './utils/paths';
-import { logger } from './utils/logger';
+import { logger, getSuccessfulRequests, getFailedRequests } from './utils/logger';
 import { getVersion } from './version';
 
 // Конфигурация сервера
@@ -324,6 +324,31 @@ const server = Bun.serve({
       if (path === '/health' && method === 'GET') {
         logger.http(method, path, 200, Date.now() - startTime);
         return new Response(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // GET /metrics - метрики системы
+      if (path === '/metrics' && method === 'GET') {
+        const repoIds = repoManager.getAllRepoIds();
+        const totalPackages = repoIds.reduce((sum, id) => {
+          const info = repoManager.getRepoInfo(id);
+          return sum + info.packagesCount;
+        }, 0);
+        
+        const metrics = {
+          packages: totalPackages,
+          repositories: repoIds.length,
+          uptime: process.uptime(),
+          httpRequests: {
+            successful: getSuccessfulRequests(),
+            failed: getFailedRequests()
+          },
+          synchronization: repoManager.getAllReposSyncInfo()
+        };
+        
+        logger.http(method, path, 200, Date.now() - startTime);
+        return new Response(JSON.stringify(metrics), {
           headers: { 'Content-Type': 'application/json' }
         });
       }

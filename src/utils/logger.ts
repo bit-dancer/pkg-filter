@@ -11,6 +11,10 @@ interface LogEntry {
   context?: Record<string, unknown>;
 }
 
+// Глобальные метрики HTTP запросов
+let successfulRequests = 0;
+let failedRequests = 0;
+
 class Logger {
   private minLevel: LogLevel;
   private levelPriority: Record<LogLevel, number> = {
@@ -102,6 +106,13 @@ class Logger {
       durationMs,
       ...context
     });
+    
+    // Обновить счетчики метрик
+    if (status >= 500) {
+      failedRequests++;
+    } else {
+      successfulRequests++;
+    }
   }
   
   /**
@@ -132,3 +143,16 @@ class Logger {
 
 // Экспорт экземпляра по умолчанию
 export const logger = new Logger(process.env.LOG_LEVEL as LogLevel || 'info');
+
+// Экспорт функций для получения метрик
+export function getSuccessfulRequests(): number {
+  return successfulRequests;
+}
+
+export function getFailedRequests(): number {
+  return failedRequests;
+}
+
+export function incrementFailedRequests(): void {
+  failedRequests++;
+}
