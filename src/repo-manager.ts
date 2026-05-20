@@ -3,11 +3,13 @@
  */
 
 import { Database } from 'bun:sqlite';
+import { ProxyAgent } from 'undici';
 import type { RepoConfig, FilterRule } from './filter';
 import { parsePackages, serializePackages, type PackageRecord } from './parser';
 import { applyInclude, applyExclude, applyVersionKeep, resolveDependencies } from './filter';
 import { getDbPath, getConfigPath, validateRepoId } from './utils/paths';
 import { CacheManager } from './utils/cache-manager';
+import { logger } from './utils/logger';
 
 export interface SyncResult {
   repoId: string;
@@ -453,6 +455,10 @@ export class RepoManager {
     const baseUrl = config.upstream.replace(/\/$/, '');
     const dist = config.dist;
     
+    // Настройки из конфига с дефолтными значениями
+    const timeoutMs = config['http-timeout'] ?? 30000; // 30 секунд по умолчанию
+    const proxyUrl = config['http-proxy'];
+    
     // Попробовать сжатый и несжатый варианты
     const urls = [
       `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages.gz`,
@@ -460,13 +466,37 @@ export class RepoManager {
     ];
     
     for (const url of urls) {
+      const requestStartTime = Date.now();
       try {
-        // Таймаут на запрос (30 секунд)
+        // Таймаут на запрос
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         
-        const response = await fetch(url, { signal: controller.signal });
+        // Подготовка опций для fetch
+        const fetchOptions: RequestInit = { 
+          signal: controller.signal,
+        };
+        
+        // Добавляем proxy если указан
+        if (proxyUrl) {
+          // Bun поддерживает proxy через переменную окружения или напрямую в fetch
+          // Для SOCKS5 и HTTP proxy используем стандартный подход
+          fetchOptions.dispatcher = new ProxyAgent(proxyUrl);
+        }
+        
+        const response = await fetch(url, fetchOptions);
         clearTimeout(timeoutId);
+        
+        const duration = Date.now() - requestStartTime;
+        
+        // Логирование запроса к upstream
+        logger.upstreamRequest(url, response.status, duration, {
+          repoId: config.id || 'unknown',
+          component,
+          arch,
+          proxy: proxyUrl ? 'yes' : 'no',
+          timeout: timeoutMs
+        });
         
         if (!response.ok) continue;
         
@@ -484,9 +514,28 @@ export class RepoManager {
         const packages = parsePackages(content);
         return packages; // Успешно скачали, вернуть результат
       } catch (e) {
+        const duration = Date.now() - requestStartTime;
         // Попробовать следующий URL
         if (e instanceof Error && e.name === 'AbortError') {
-          console.warn(`Request timeout for ${url}`);
+          logger.upstreamRequest(url, 0, duration, {
+            repoId: config.id || 'unknown',
+            component,
+            arch,
+            proxy: proxyUrl ? 'yes' : 'no',
+            timeout: timeoutMs,
+            error: 'Timeout'
+          });
+          console.warn(`Request timeout for ${url} after ${timeoutMs}ms`);
+        } else if (e instanceof Error) {
+          logger.upstreamRequest(url, 0, duration, {
+            repoId: config.id || 'unknown',
+            component,
+            arch,
+            proxy: proxyUrl ? 'yes' : 'no',
+            timeout: timeoutMs,
+            error: e.message
+          });
+          console.warn(`Request failed for ${url}: ${e.message}`);
         }
         continue;
       }
