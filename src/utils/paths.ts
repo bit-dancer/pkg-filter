@@ -21,6 +21,7 @@ export const paths = {
   dbPath: process.env.DB_PATH || join(ROOT_DIR, 'data', 'packages.db'),
   reposDir: process.env.REPOS_DIR || join(ROOT_DIR, 'config', 'repos'),
   logFile: process.env.LOG_FILE || join(ROOT_DIR, 'data', 'app.log'),
+  tempDir: process.env.TEMP_DIR || join(ROOT_DIR, 'data', 'temp'),
 };
 
 /**
@@ -86,4 +87,33 @@ export function validateRepoId(repoId: string): boolean {
   // Разрешены только буквы, цифры, дефис и подчеркивание
   const repoIdRegex = /^[a-zA-Z0-9_-]+$/;
   return repoIdRegex.test(repoId);
+}
+
+/**
+ * Получить абсолютный путь к директории временных файлов
+ */
+export function getTempDir(): string {
+  return paths.tempDir;
+}
+
+/**
+ * Создать директорию если она не существует
+ */
+export async function ensureDir(dirPath: string): Promise<void> {
+  try {
+    await Bun.$`mkdir -p ${dirPath}`;
+  } catch {
+    // Fallback для сред без bash - используем fs.mkdirSync
+    const { mkdirSync } = await import('fs');
+    mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+/**
+ * Сгенерировать случайное имя файла
+ */
+export function generateRandomFilename(prefix: string = 'temp', extension: string = ''): string {
+  const randomStr = Math.random().toString(36).substring(2, 15);
+  const timestamp = Date.now();
+  return `${prefix}_${timestamp}_${randomStr}${extension}`;
 }
