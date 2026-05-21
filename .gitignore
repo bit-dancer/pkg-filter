@@ -12,22 +12,16 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py.class
 .Python
 env/
 venv/
 .venv/
+.ENV
 .venv.bak/
 pip-log.txt
 pip-selfcheck.json
-*.so
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
+.python-version
 
 # Logs
 *.log
@@ -36,6 +30,7 @@ coverage.xml
 .env
 .env.local
 .env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -43,12 +38,41 @@ coverage.xml
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Compressed
+# Coverage
+.coverage
+coverage/
+htmlcov/
+.nyc_output
+coverage-final.json
+
+# Testing
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+
+# Distribution
+*.tar.gz
+*.egg-info/
+*.dist-info/
+
+# OS
+.DS_Store
+ehthumbs.db
+Icon?
+Thumbs.db
+*:*
+._*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Compression
 *.zip
 *.gz
 *.tar
@@ -71,10 +95,4 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-
-# Testing
-coverage/
-htmlcov/
-.tox/
-.nox/
 ```

@@ -17,6 +17,7 @@ export interface SyncResult {
   packagesCount: number;
   filteredCount: number;
   unresolvedDeps: string[];
+  excludedRequiredDeps?: string[]; // Пакеты из exclude, которые нужны для зависимостей
   error?: string;
   timestamp: Date;
 }
@@ -162,6 +163,15 @@ export class RepoManager {
       const configData = Bun.file(path);
       const text = await configData.text();
       const config: Record<string, RepoConfig> = JSON.parse(text);
+      
+      // Настроить логирование из конфига
+      const globalConfig = config as any;
+      if (globalConfig.logPath) {
+        logger.setLogFilePath(globalConfig.logPath);
+      }
+      if (globalConfig.logToStdout === true) {
+        logger.setStdoutEnabled(true);
+      }
       
       for (const [repoId, repoConfig] of Object.entries(config)) {
         // Валидировать repoId
@@ -349,7 +359,8 @@ export class RepoManager {
         followSuggests,
         allowUnresolved,
         depsReposMap,
-        repoId
+        repoId,
+        excludedByRules // Передать множество исключенных пакетов для проверки конфликтов
       );
 
       // Логирование отфильтрованных пакетов
@@ -376,6 +387,28 @@ export class RepoManager {
         for (const depName of resolved.unresolved) {
           unresolvedDepsSet.add(depName);
         }
+      }
+
+      // Логирование и обработка пакетов из exclude, которые нужны для зависимостей
+      if (resolved.excludedRequiredDeps.length > 0) {
+        const errorMsg = `Sync error: packages from exclude are required as dependencies: ${resolved.excludedRequiredDeps.join(', ')}`;
+        this.log(repoId, 'error', errorMsg);
+        
+        this.db.run(
+          'UPDATE repos SET sync_status = ? WHERE id = ?',
+          ['failed', repoId]
+        );
+
+        return {
+          repoId,
+          success: false,
+          packagesCount: allPackages.length,
+          filteredCount: 0,
+          unresolvedDeps: resolved.unresolved,
+          excludedRequiredDeps: resolved.excludedRequiredDeps,
+          error: errorMsg,
+          timestamp: new Date()
+        };
       }
 
       // Сохранить в БД с информацией о фильтрации
@@ -1038,12 +1071,14 @@ export class RepoManager {
     followRecommends: boolean,
     followSuggests: boolean,
     allowUnresolved: boolean = false,
-    depsReposMap: Map<string, PackageRecord[]> = new Map()
-  ): { packages: PackageRecord[]; unresolved: string[] } {
+    depsReposMap: Map<string, PackageRecord[]> = new Map(),
+    excludedSet?: Set<string>
+  ): { packages: PackageRecord[]; unresolved: string[]; excludedRequiredDeps: string[] } {
     const resolvedNames = new Set<string>();
     const resolvedPackages = new Map<string, PackageRecord>();
     const queue: string[] = [];
     const unresolved: string[] = [];
+    const excludedRequiredDeps: string[] = []; // Пакеты которые нужны как зависимости но были исключены
     
     // Добавить все целевые пакеты
     for (const pkg of targetPackages) {
@@ -1106,7 +1141,11 @@ export class RepoManager {
               const pkg = repoMap.get(depName);
               if (pkg) {
                 const key = `${depName}:${pkg.Version}`;
-                if (!resolvedPackages.has(key)) {
+                
+                // Проверить: если пакет есть в excludedSet - это ошибка синхронизации
+                if (excludedSet && excludedSet.has(key)) {
+                  excludedRequiredDeps.push(depName);
+                } else if (!resolvedPackages.has(key)) {
                   resolvedPackages.set(key, pkg);
                   if (!queue.includes(depName)) {
                     queue.push(depName);
@@ -1117,7 +1156,11 @@ export class RepoManager {
             }
           } else {
             const key = `${depName}:${latestPkg.Version}`;
-            if (!resolvedPackages.has(key)) {
+            
+            // Проверить: если пакет есть в excludedSet - это ошибка синхронизации
+            if (excludedSet && excludedSet.has(key)) {
+              excludedRequiredDeps.push(depName);
+            } else if (!resolvedPackages.has(key)) {
               resolvedPackages.set(key, latestPkg);
               if (!queue.includes(depName)) {
                 queue.push(depName);
@@ -1135,7 +1178,7 @@ export class RepoManager {
       }
     }
     
-    return { packages: Array.from(resolvedPackages.values()), unresolved };
+    return { packages: Array.from(resolvedPackages.values()), unresolved, excludedRequiredDeps };
   }
   
   /**

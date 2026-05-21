@@ -17,7 +17,7 @@ let syncInProgress = false;
 
 // Запустить инициализацию при старте
 initApp().catch((error) => {
-  logger.error('Failed to initialize application', { error: error instanceof Error ? error.message : String(error) });
+  logger.error('Failed to initialize application', { error: error instanceof Error ? error.message : String(error) }, true);
 });
 
 // Интервал для периодической синхронизации
@@ -40,7 +40,7 @@ setInterval(async () => {
 
 // Graceful shutdown
 async function gracefulShutdown(signal: string) {
-  logger.info(`${signal} received, shutting down gracefully...`);
+  logger.info(`${signal} received, shutting down gracefully...`, undefined, true);
   
   // Остановить сервер
   server.stop();
@@ -50,14 +50,14 @@ async function gracefulShutdown(signal: string) {
     repoManager.close();
   }
   
-  logger.info('Graceful shutdown completed');
+  logger.info('Graceful shutdown completed', undefined, true);
   process.exit(0);
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-logger.info(`Debian Package Filter Proxy Server ${getVersion()} starting...`);
+logger.info(`Debian Package Filter Proxy Server ${getVersion()} starting...`, undefined, true);
 
 const server = Bun.serve({
   port: port,

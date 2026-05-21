@@ -257,7 +257,8 @@ function parseDependencyList(depString: string): string[] {
  * @param allowUnresolved - разрешать ли отсутствие зависимостей (не выводить ошибку)
  * @param depsReposMap - мапа репозиториев для поиска зависимостей: repoId -> PackageRecord[]
  * @param currentRepoId - ID текущего репозитория (для предотвращения циклов)
- * @returns отфильтрованный список пакетов (только целевые + их зависимости)
+ * @param excludedSet - множество исключенных пакетов (pkgKey format "name:version") для проверки конфликтов
+ * @returns отфильтрованный список пакетов (только целевые + их зависимости) + информация о конфликтах
  */
 export function resolveDependencies(
   allPackages: PackageRecord[], 
@@ -266,8 +267,9 @@ export function resolveDependencies(
   followSuggests: boolean,
   allowUnresolved: boolean = false,
   depsReposMap: Map<string, PackageRecord[]> = new Map(),
-  currentRepoId?: string
-): { packages: PackageRecord[]; unresolved: string[] } {
+  currentRepoId?: string,
+  excludedSet?: Set<string>
+): { packages: PackageRecord[]; unresolved: string[]; excludedRequiredDeps: string[] } {
   // Оптимизация: создать мапу только один раз и использовать кэш версий
   const packageMap = new Map<string, { versions: PackageRecord[]; latest: PackageRecord }>();
   
@@ -309,6 +311,7 @@ export function resolveDependencies(
   const resolvedPackages = new Map<string, PackageRecord>(); // name+version -> pkg
   const queue: string[] = [];
   const unresolved: string[] = [];
+  const excludedRequiredDeps: string[] = []; // Пакеты которые нужны как зависимости но были исключены
   
   // Добавить все целевые пакеты в очередь
   for (const pkg of targetPackages) {
@@ -363,7 +366,11 @@ export function resolveDependencies(
             // Взять последнюю версию (уже вычислена при построении мапы)
             const latest = depEntry.latest;
             const key = `${depName}:${latest.Version}`;
-            if (!resolvedPackages.has(key)) {
+            
+            // Проверить: если пакет есть в excludedSet - это ошибка синхронизации
+            if (excludedSet && excludedSet.has(key)) {
+              excludedRequiredDeps.push(depName);
+            } else if (!resolvedPackages.has(key)) {
               resolvedPackages.set(key, latest);
               
               // Добавить в очередь только если еще не обработано
@@ -383,6 +390,6 @@ export function resolveDependencies(
     }
   }
   
-  // Вернуть только разрешенные пакеты
-  return { packages: Array.from(resolvedPackages.values()), unresolved };
+  // Вернуть только разрешенные пакеты + информацию о конфликтах
+  return { packages: Array.from(resolvedPackages.values()), unresolved, excludedRequiredDeps };
 }
