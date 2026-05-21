@@ -52,6 +52,9 @@ describe("E2E Tests", () => {
     const res = await fetch("http://localhost:3000/r/test-repo/packages/list");
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(Array.isArray(json)).toBeTrue();
+    // Response is an object with packages array, not a direct array
+    expect(json).toBeDefined();
+    expect(json.packages).toBeDefined();
+    expect(Array.isArray(json.packages)).toBeTrue();
   });
 });
