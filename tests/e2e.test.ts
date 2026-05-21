@@ -44,14 +44,14 @@ describe("E2E Tests", () => {
   test("should health check", async () => {
     const res = await fetch("http://localhost:3000/health");
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json = await res.json() as { status: string };
     expect(json.status).toBe("ok");
   });
 
   test("should list packages", async () => {
     const res = await fetch("http://localhost:3000/r/test-repo/packages/list");
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json = await res.json() as { packages?: unknown[] };
     // Response is an object with packages array, not a direct array
     expect(json).toBeDefined();
     expect(json.packages).toBeDefined();

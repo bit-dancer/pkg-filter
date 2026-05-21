@@ -43,19 +43,30 @@ export function getDbPath(): string {
 export function normalizePath(inputPath: string): string {
   try {
     // Decode URL encoding для защиты от %2e%2e атак
-    const decoded = decodeURIComponent(inputPath);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(inputPath);
+    } catch {
+      // Если decodeURIComponent упал (невалидный URL encoding) - отклоняем
+      throw new Error('Invalid path: malformed URL encoding');
+    }
     
-    // Отклонить если содержит ..
+    // Отклонить если содержит .. после декодирования
     if (decoded.includes('..')) {
       throw new Error('Invalid path: directory traversal detected');
     }
     
     // Удалить начальные слеши
-    const sanitized = decoded.replace(/^\/+/, '');
+    let sanitized = decoded.replace(/^\/+/, '');
     
     // Дополнительная проверка на абсолютные пути
     if (sanitized.startsWith('/') || sanitized.includes('\\')) {
       throw new Error('Invalid path: absolute paths not allowed');
+    }
+    
+    // Проверка на пустой путь после нормализации
+    if (sanitized.length === 0) {
+      throw new Error('Invalid path: empty path after normalization');
     }
     
     return sanitized;
@@ -63,10 +74,8 @@ export function normalizePath(inputPath: string): string {
     if (error instanceof Error && error.message.includes('Invalid path')) {
       throw error;
     }
-    // Если decodeURIComponent упал (невалидный URL encoding)
-    const err = new Error('Invalid path: malformed URL encoding');
-    err.cause = error;
-    throw err;
+    // Любая другая ошибка при обработке пути
+    throw new Error('Invalid path: malformed input');
   }
 }
 

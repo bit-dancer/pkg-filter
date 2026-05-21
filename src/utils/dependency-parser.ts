@@ -48,14 +48,14 @@ function parseSingleDependency(str: string): Dependency | null {
     // Fallback for complex cases or strict parsing failure
     // Just return name if version part is malformed
     const nameMatch = trimmed.match(/^([a-zA-Z0-9.+-]+)/);
-    if (nameMatch) {
+    if (nameMatch && nameMatch[1]) {
       return { name: nameMatch[1], orGroup: 0 };
     }
     return null;
   }
 
   return {
-    name: match[1],
+    name: match[1]!,
     versionOp: match[2],
     version: match[3],
     orGroup: 0 // Will be set by caller

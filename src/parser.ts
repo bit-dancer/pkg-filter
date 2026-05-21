@@ -4,7 +4,23 @@
  */
 
 export interface PackageRecord {
-  [key: string]: string;
+  Package: string;
+  Version: string;
+  Architecture?: string;
+  Maintainer?: string;
+  Depends?: string;
+  PreDepends?: string;
+  Recommends?: string;
+  Suggests?: string;
+  Priority?: string;
+  Section?: string;
+  InstalledSize?: string;
+  MD5sum?: string;
+  SHA256?: string;
+  Filename?: string;
+  Size?: string;
+  Description?: string;
+  [key: string]: string | undefined;
 }
 
 /**
@@ -68,10 +84,12 @@ export function serializePackages(packages: PackageRecord[]): string {
     const lines: string[] = [];
     for (const [key, value] of Object.entries(pkg)) {
       // Разбить длинные строки на несколько строк (продолжение с пробелом)
-      const valueLines = value.split('\n');
-      lines.push(`${key}: ${valueLines[0]}`);
-      for (let i = 1; i < valueLines.length; i++) {
-        lines.push(` ${valueLines[i]}`);
+      if (value !== undefined) {
+        const valueLines = value.split('\n');
+        lines.push(`${key}: ${valueLines[0]}`);
+        for (let i = 1; i < valueLines.length; i++) {
+          lines.push(` ${valueLines[i]}`);
+        }
       }
     }
     return lines.join('\n');

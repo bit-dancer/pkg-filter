@@ -107,6 +107,14 @@ export class RepoManager {
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_packages_repo_name ON packages(repo_id, package_name)
     `);
+    // Индекс для фильтрации по статусу (критично для производительности)
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_packages_status ON packages(status)
+    `);
+    // Составной индекс для быстрого поиска активных пакетов по репозиторию
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_packages_repo_status ON packages(repo_id, status)
+    `);
 
     // Таблица логов синхронизации
     this.db.run(`
@@ -158,10 +166,9 @@ export class RepoManager {
    * Загрузить конфигурацию из JSON файла
    */
   async loadConfig(configPath?: string) {
-    const path = configPath || getConfigPath();
+    const configPathResolved = configPath || getConfigPath();
     try {
-      const configData = Bun.file(path);
-      const text = await configData.text();
+      const text = await Bun.file(configPathResolved).text();
       const config: Record<string, RepoConfig> = JSON.parse(text);
       
       // Настроить логирование из конфига
@@ -192,7 +199,7 @@ export class RepoManager {
       this.log('system', 'info', `Loaded ${this.config.size} repositories from config`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to load config from ${path}: ${errorMsg}`);
+      throw new Error(`Failed to load config from ${configPathResolved}: ${errorMsg}`);
     }
   }
 

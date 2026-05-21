@@ -37,10 +37,10 @@ export interface RepoConfig {
 /**
  * Проверяет, соответствует ли пакет правилу фильтрации
  */
-function matchesRule(pkg: PackageRecord | { Package: string; Version: string; Priority: string }, rule: FilterRule): boolean {
+function matchesRule(pkg: PackageRecord, rule: FilterRule): boolean {
   // Проверка по имени (RegExp или точное совпадение)
   if (rule.name !== undefined) {
-    const pkgName = pkg.Package || '';
+    const pkgName = pkg.Package;
     let matches = false;
     
     if (rule.name.startsWith('^') || rule.name.includes('.*') || rule.name.includes('.+')) {
@@ -57,7 +57,7 @@ function matchesRule(pkg: PackageRecord | { Package: string; Version: string; Pr
   
   // Проверка по версии (RegExp или точное совпадение)
   if (rule.version !== undefined) {
-    const pkgVersion = pkg.Version || '';
+    const pkgVersion = pkg.Version;
     let matches = false;
     
     if (rule.version.startsWith('r|')) {
@@ -79,7 +79,7 @@ function matchesRule(pkg: PackageRecord | { Package: string; Version: string; Pr
   
   // Проверка по приоритету
   if (rule.priority !== undefined && rule.priority.length > 0) {
-    const pkgPriority = pkg.Priority || '';
+    const pkgPriority = pkg.Priority ?? '';
     if (!rule.priority.includes(pkgPriority)) {
       return false;
     }
