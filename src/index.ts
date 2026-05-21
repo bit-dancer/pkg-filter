@@ -4,13 +4,40 @@
 
 import { initApp, repoManager, createErrorResponse, parsePaginationParams } from './server';
 import { serializePackages } from './parser';
-import { validateRepoId, normalizePath } from './utils/paths';
+import { validateRepoId, normalizePath, getConfigPath } from './utils/paths';
 import { logger, getSuccessfulRequests, getFailedRequests } from './utils/logger';
 import { getVersion } from './version';
 
 // Конфигурация сервера
 const port = parseInt(process.env.PORT || '8080');
-const syncInterval = parseInt(process.env.SYNC_INTERVAL || '1800000'); // 30 минут по умолчанию
+
+// Чтение syncInterval из config.json или переменной окружения
+let syncInterval: number;
+try {
+  const configPath = getConfigPath();
+  const configText = await Bun.file(configPath).text();
+  const config = JSON.parse(configText);
+  if (config.syncInterval) {
+    // Парсим строку формата "1h", "30m", "3600s" и т.д.
+    const intervalStr = config.syncInterval;
+    const match = intervalStr.match(/^(\d+)([hms])$/);
+    if (match) {
+      const value = parseInt(match[1]);
+      const unit = match[2];
+      if (unit === 'h') syncInterval = value * 60 * 60 * 1000;
+      else if (unit === 'm') syncInterval = value * 60 * 1000;
+      else if (unit === 's') syncInterval = value * 1000;
+      else syncInterval = parseInt(process.env.SYNC_INTERVAL || '1800000');
+    } else {
+      syncInterval = parseInt(process.env.SYNC_INTERVAL || '1800000');
+    }
+  } else {
+    syncInterval = parseInt(process.env.SYNC_INTERVAL || '1800000');
+  }
+} catch (e) {
+  // Если не удалось прочитать конфиг, используем переменную окружения
+  syncInterval = parseInt(process.env.SYNC_INTERVAL || '1800000');
+}
 
 // Флаг для предотвращения гонки при периодической синхронизации
 let syncInProgress = false;

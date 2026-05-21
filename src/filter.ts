@@ -26,7 +26,6 @@ export interface RepoConfig {
     'follow-recommends': boolean;
     'follow-suggests': boolean;
   };
-  'verify-checksums'?: boolean;
   'allow-unresolved'?: boolean;
   'deps-repos'?: string[];
   // Настройки подключения к upstream
