@@ -6,9 +6,10 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-// Получаем директорию проекта
+// Получаем директорию проекта (WORKDIR)
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = join(__dirname, '..');
+// __dirname это /workspace/src/utils, нужно подняться на 2 уровня вверх до WORKDIR
+const ROOT_DIR = join(__dirname, '..', '..');
 
 /**
  * Конфигурация путей
@@ -19,6 +20,7 @@ export const paths = {
   dataDir: process.env.DATA_DIR || join(ROOT_DIR, 'data'),
   dbPath: process.env.DB_PATH || join(ROOT_DIR, 'data', 'packages.db'),
   reposDir: process.env.REPOS_DIR || join(ROOT_DIR, 'config', 'repos'),
+  logFile: process.env.LOG_FILE || join(ROOT_DIR, 'data', 'app.log'),
 };
 
 /**

@@ -1,6 +1,7 @@
 {
   "logLevel": "info",
-  "logPath": "/app/logs/app.log",
+  "logPath": "./data/app.log",
+  "logToStdout": false,
   "port": 3000,
   "syncInterval": "1h",
   "gpgKey": null,

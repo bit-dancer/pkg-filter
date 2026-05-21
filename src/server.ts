@@ -17,15 +17,15 @@ const repoManager = new RepoManager();
 export async function initApp() {
   try {
     await repoManager.loadConfig();
-    logger.info('Configuration loaded successfully');
+    logger.info('Configuration loaded successfully', undefined, true);
   } catch (error) {
-    logger.error('Failed to load config', { error: error instanceof Error ? error.message : String(error) });
+    logger.error('Failed to load config', { error: error instanceof Error ? error.message : String(error) }, true);
     throw error;
   }
 
   // Синхронизировать все репозитории при старте
   const repoIds = repoManager.getAllRepoIds();
-  logger.info(`Starting initial sync for ${repoIds.length} repositories...`);
+  logger.info(`Starting initial sync for ${repoIds.length} repositories...`, undefined, true);
   
   for (const repoId of repoIds) {
     const result = await repoManager.syncRepo(repoId);
@@ -36,7 +36,7 @@ export async function initApp() {
     }
   }
   
-  logger.info('Initial sync completed');
+  logger.info('Initial sync completed', undefined, true);
 }
 
 /**
