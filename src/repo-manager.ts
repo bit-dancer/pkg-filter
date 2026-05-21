@@ -4,12 +4,14 @@
 
 import { Database } from 'bun:sqlite';
 import { ProxyAgent } from 'undici';
+import { join } from 'path';
 import type { RepoConfig, FilterRule } from './filter';
 import { parsePackages, serializePackages, type PackageRecord } from './parser';
 import { applyInclude, applyExclude, applyVersionKeep, resolveDependencies } from './filter';
-import { getDbPath, getConfigPath, validateRepoId } from './utils/paths';
+import { getDbPath, getConfigPath, validateRepoId, getTempDir, ensureDir, generateRandomFilename } from './utils/paths';
 import { CacheManager } from './utils/cache-manager';
 import { logger } from './utils/logger';
+import { unlinkSync } from 'fs';
 
 export interface SyncResult {
   repoId: string;
@@ -506,6 +508,7 @@ export class RepoManager {
 
   /**
    * Скачать пакеты для конкретного компонента и архитектуры
+   * Использует временные файлы для потоковой обработки без загрузки в память
    */
   private async fetchComponentPackages(config: RepoConfig, component: string, arch: string): Promise<PackageRecord[]> {
     const baseUrl = config.upstream.replace(/\/$/, '');
@@ -521,6 +524,9 @@ export class RepoManager {
       `${baseUrl}/dists/${dist}/${component}/binary-${arch}/Packages`
     ];
     
+    let tempFilePath: string | null = null;
+    let packagesGzPath: string | null = null;
+    
     for (const url of urls) {
       const requestStartTime = Date.now();
       try {
@@ -535,8 +541,6 @@ export class RepoManager {
         
         // Добавляем proxy если указан
         if (proxyUrl) {
-          // Bun поддерживает proxy через переменную окружения или напрямую в fetch
-          // Для SOCKS5 и HTTP proxy используем стандартный подход
           fetchOptions.dispatcher = new ProxyAgent(proxyUrl);
         }
         
@@ -556,21 +560,80 @@ export class RepoManager {
         
         if (!response.ok) continue;
         
-        let content: string;
+        // Создать временную директорию если не существует
+        const tempDir = getTempDir();
+        await ensureDir(tempDir);
         
-        if (url.endsWith('.gz')) {
-          const arrayBuffer = await response.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const decompressed = Bun.gunzipSync(uint8Array);
-          content = new TextDecoder().decode(decompressed);
+        // Сгенерировать случайные имена для временных файлов
+        const isGzipped = url.endsWith('.gz');
+        tempFilePath = join(tempDir, generateRandomFilename('packages', '.txt'));
+        
+        if (isGzipped) {
+          // Для .gz файла: сохранить Packages.gz во временный файл, затем распаковать в другой временный файл
+          packagesGzPath = join(tempDir, generateRandomFilename('packages', '.gz'));
+          
+          // Потоково записать .gz файл во временный файл
+          const gzWriter = Bun.file(packagesGzPath).writer;
+          const reader = response.body;
+          if (!reader) {
+            throw new Error('Response body is null');
+          }
+          
+          for await (const chunk of reader) {
+            gzWriter.write(chunk);
+          }
+          gzWriter.end();
+          
+          // Распаковать .gz файл во временный текстовый файл потоково
+          const gzFile = Bun.file(packagesGzPath);
+          const gzData = await gzFile.arrayBuffer();
+          const decompressed = Bun.gunzipSync(new Uint8Array(gzData));
+          
+          // Записать распакованные данные во временный файл
+          await Bun.write(tempFilePath, decompressed);
         } else {
-          content = await response.text();
+          // Для обычного Packages файла: сохранить сразу во временный файл
+          const writer = Bun.file(tempFilePath).writer;
+          const reader = response.body;
+          if (!reader) {
+            throw new Error('Response body is null');
+          }
+          
+          for await (const chunk of reader) {
+            writer.write(chunk);
+          }
+          writer.end();
         }
         
+        // Потоково прочитать из временного файла и распарсить
+        const content = await Bun.file(tempFilePath).text();
         const packages = parsePackages(content);
+        
+        // Очистить временные файлы после успешного парсинга
+        if (tempFilePath && Bun.file(tempFilePath).exists) {
+          unlinkSync(tempFilePath);
+          tempFilePath = null;
+        }
+        if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+          unlinkSync(packagesGzPath);
+          packagesGzPath = null;
+        }
+        
         return packages; // Успешно скачали, вернуть результат
+        
       } catch (e) {
         const duration = Date.now() - requestStartTime;
+        
+        // Очистка временных файлов при ошибке
+        if (tempFilePath && Bun.file(tempFilePath).exists) {
+          try { unlinkSync(tempFilePath); } catch {}
+          tempFilePath = null;
+        }
+        if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+          try { unlinkSync(packagesGzPath); } catch {}
+          packagesGzPath = null;
+        }
+        
         // Попробовать следующий URL
         if (e instanceof Error && e.name === 'AbortError') {
           logger.upstreamRequest(url, 0, duration, {
@@ -595,6 +658,14 @@ export class RepoManager {
         }
         continue;
       }
+    }
+    
+    // Очистка временных файлов если ни один URL не сработал
+    if (tempFilePath && Bun.file(tempFilePath).exists) {
+      try { unlinkSync(tempFilePath); } catch {}
+    }
+    if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+      try { unlinkSync(packagesGzPath); } catch {}
     }
     
     return []; // Ни один URL не сработал
