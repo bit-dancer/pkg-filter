@@ -3,6 +3,8 @@
  */
 
 import { paths } from './paths';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -28,7 +30,7 @@ class Logger {
     warn: 2,
     error: 3
   };
-  private logStream: Bun.File | null = null;
+  private logStream: fs.WriteStream | null = null;
   private logFilePath: string | null = null;
 
   constructor(minLevel: LogLevel = 'info', logFilePath?: string) {
@@ -58,14 +60,14 @@ class Logger {
     try {
       // Использовать путь из конфига если задан, иначе путь по умолчанию
       const logPath = this.logFilePath || paths.logFile;
-      
+
       // Убедиться, что директория существует
-      const logDir = logPath.substring(0, logPath.lastIndexOf('/'));
-      if (logDir && !Bun.file(logDir).exists()) {
-        await Bun.mkdir(logDir, { recursive: true });
+      const logDir = path.dirname(logPath);
+      if (logDir && !fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
       }
-      
-      this.logStream = Bun.file(logPath);
+
+      this.logStream = fs.createWriteStream(logPath, { flags: 'a' });
     } catch (error) {
       console.error(`Failed to initialize log file: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -74,7 +76,7 @@ class Logger {
   private async writeToFile(formatted: string) {
     if (this.logStream) {
       try {
-        await this.logStream.write(formatted + '\n');
+        this.logStream.write(formatted + '\n');
       } catch (error) {
         console.error(`Failed to write to log file: ${error instanceof Error ? error.message : String(error)}`);
       }

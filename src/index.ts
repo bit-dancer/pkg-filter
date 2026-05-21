@@ -73,6 +73,11 @@ const server = Bun.serve({
       const syncMatch = path.match(/^\/r\/([^/]+)\/sync$/);
       if (syncMatch && method === 'GET') {
         const repoId = syncMatch[1];
+        if (!repoId) {
+          const response = createErrorResponse('Invalid repository ID', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -102,6 +107,11 @@ const server = Bun.serve({
       const packagesListMatch = path.match(/^\/r\/([^/]+)\/packages\/list$/);
       if (packagesListMatch && method === 'GET') {
         const repoId = packagesListMatch[1];
+        if (!repoId) {
+          const response = createErrorResponse('Invalid repository ID', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -143,6 +153,11 @@ const server = Bun.serve({
       const infoMatch = path.match(/^\/r\/([^/]+)\/info$/);
       if (infoMatch && method === 'GET') {
         const repoId = infoMatch[1];
+        if (!repoId) {
+          const response = createErrorResponse('Invalid repository ID', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -178,6 +193,11 @@ const server = Bun.serve({
       const logsMatch = path.match(/^\/r\/([^/]+)\/logs$/);
       if (logsMatch && method === 'GET') {
         const repoId = logsMatch[1];
+        if (!repoId) {
+          const response = createErrorResponse('Invalid repository ID', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -203,9 +223,14 @@ const server = Bun.serve({
       }
       
       // GET /r/:repo/dists/:dist/:component/binary-:arch/Packages(.gz)?
-      const packagesMatch = path.match(/^\/r\/([^/]+)\/dists\/([^/]+)\/([^/]+)\/binary-([^/]+)\/Packages(\.gz)?$/);
+      const packagesMatch = path.match(/^\/r\/([^/]+)\/dists\/([^/]+)\/([^/]+)\/binary-([^/]+)\/Packages(\\.gz)?$/);
       if (packagesMatch && method === 'GET') {
         const [, repoId, dist, component, arch, isGzipped] = packagesMatch;
+        if (!repoId || !arch) {
+          const response = createErrorResponse('Invalid repository ID or architecture', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -258,6 +283,11 @@ const server = Bun.serve({
       const poolMatch = path.match(/^\/r\/([^/]+)\/pool\/(.*)$/);
       if (poolMatch && method === 'GET') {
         const [, repoId, poolPath] = poolMatch;
+        if (!repoId) {
+          const response = createErrorResponse('Invalid repository ID', 400);
+          logger.http(method, path, 400, Date.now() - startTime);
+          return response;
+        }
         
         // Валидация repoId
         if (!validateRepoId(repoId)) {
@@ -274,7 +304,7 @@ const server = Bun.serve({
           }
           
           // Нормализовать poolPath для безопасности (защита от "..")
-          const normalizedPoolPath = normalizePath(poolPath);
+          const normalizedPoolPath = normalizePath(poolPath || '');
           
           // Построить URL на upstream
           const baseUrl = config.upstream.replace(/\/$/, '');

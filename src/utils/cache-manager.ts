@@ -10,6 +10,7 @@
  */
 
 import { join } from 'path';
+import * as fs from 'fs';
 import { paths, validateRepoId } from './paths';
 
 export interface CacheFileInfo {
@@ -29,8 +30,10 @@ export class CacheManager {
     this.maxFiles = maxFiles;
     this.maxAgeHours = maxAgeHours;
     
-    if (!Bun.file(this.cacheDir).exists()) {
-      Bun.write(Bun.file(join(this.cacheDir, '.gitkeep')), '');
+    if (!fs.existsSync(this.cacheDir)) {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+      // Создать .gitkeep для отслеживания директории в git
+      fs.writeFileSync(join(this.cacheDir, '.gitkeep'), '');
     }
   }
 
@@ -57,15 +60,14 @@ export class CacheManager {
     const finalPath = this.getFinalPath(repoId, datetime, ext);
 
     try {
-      const tempFile = Bun.file(tempPath);
-      
-      if (!await tempFile.exists()) {
+      if (!fs.existsSync(tempPath)) {
         console.error(`Cache: Temp file not found: ${tempPath}`);
         return false;
       }
 
-      await Bun.write(finalPath, tempFile.stream());
-      await Bun.unlink(tempPath);
+      // Атомарно переименовать файл (копировать + удалить старый)
+      await fs.promises.copyFile(tempPath, finalPath);
+      await fs.promises.unlink(tempPath);
       
       console.log(`Cache: Finalized sync file for ${repoId}: ${finalPath}`);
       await this.cleanup(repoId);
@@ -84,7 +86,7 @@ export class CacheManager {
 
     try {
       const files = this.getCompletedFiles(repoId, ext);
-      if (files.length === 0) return null;
+      if (files.length === 0 || !files[0]) return null;
       return join(this.cacheDir, files[0].filename);
     } catch (error) {
       console.error(`Cache: Failed to get latest file: ${error instanceof Error ? error.message : String(error)}`);
@@ -96,19 +98,19 @@ export class CacheManager {
     const files: CacheFileInfo[] = [];
     
     try {
-      const dirEntries = Bun.dir(this.cacheDir);
+      const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true });
       
-      for (const entry of dirEntries) {
-        if (entry.name.startsWith('.') || entry.isDirectory()) continue;
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || !entry.isFile()) continue;
         if (!entry.name.startsWith('_')) {
           const pattern = new RegExp(`^${repoId}_([\\d]{4}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{3})\\.${ext}$`);
           const match = entry.name.match(pattern);
           
           if (match) {
-            const timestampStr = match[1];
+            const timestampStr = match[1]!;
             const datetime = new Date(timestampStr.replace(/-/g, (m, i) => i === 19 ? '.' : i === 16 ? '-' : ':').replace(',', '.'));
             const filePath = join(this.cacheDir, entry.name);
-            const stat = Bun.file(filePath);
+            const stat = fs.statSync(filePath);
             
             files.push({ filename: entry.name, datetime, size: stat.size, isComplete: true });
           }
@@ -127,19 +129,19 @@ export class CacheManager {
     const files: CacheFileInfo[] = [];
     
     try {
-      const dirEntries = Bun.dir(this.cacheDir);
+      const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true });
       
-      for (const entry of dirEntries) {
-        if (entry.name.startsWith('.') || entry.isDirectory()) continue;
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || !entry.isFile()) continue;
         if (entry.name.startsWith('_')) {
           const pattern = new RegExp(`^_(${repoId})_([\\d]{4}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{3})\\.${ext}$`);
           const match = entry.name.match(pattern);
           
           if (match) {
-            const timestampStr = match[2];
+            const timestampStr = match[2]!;
             const datetime = new Date(timestampStr.replace(/-/g, (m, i) => i === 19 ? '.' : i === 16 ? '-' : ':').replace(',', '.'));
             const filePath = join(this.cacheDir, entry.name);
-            const stat = Bun.file(filePath);
+            const stat = fs.statSync(filePath);
             
             files.push({ filename: entry.name, datetime, size: stat.size, isComplete: false });
           }
@@ -163,16 +165,16 @@ export class CacheManager {
       const files = repoId ? this.getCompletedFiles(repoId, 'gz') : this.getAllCompletedFiles('gz');
 
       for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+        const file = files[i]!;
         const age = now - file.datetime.getTime();
         
         const shouldDeleteByAge = age > maxAgeMs;
-        const shouldDeleteByCount = repoId && i >= this.maxFiles;
+        const shouldDeleteByCount = repoId !== undefined && i >= this.maxFiles;
 
         if (shouldDeleteByAge || shouldDeleteByCount) {
           const filePath = join(this.cacheDir, file.filename);
           try {
-            await Bun.unlink(filePath);
+            await fs.promises.unlink(filePath);
             console.log(`Cache: Deleted old file: ${file.filename}`);
             deleted++;
           } catch (e) {
@@ -190,7 +192,7 @@ export class CacheManager {
         if (age > 60 * 60 * 1000) {
           const filePath = join(this.cacheDir, tempFile.filename);
           try {
-            await Bun.unlink(filePath);
+            await fs.promises.unlink(filePath);
             console.log(`Cache: Deleted stale temp file: ${tempFile.filename}`);
             deleted++;
           } catch (e) {
@@ -210,19 +212,19 @@ export class CacheManager {
     const files: CacheFileInfo[] = [];
     
     try {
-      const dirEntries = Bun.dir(this.cacheDir);
+      const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true });
       
-      for (const entry of dirEntries) {
-        if (entry.name.startsWith('.') || entry.isDirectory() || entry.name.startsWith('_')) continue;
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || !entry.isFile() || entry.name.startsWith('_')) continue;
 
         const pattern = new RegExp(`^([a-zA-Z0-9_-]+)_([\\d]{4}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{3})\\.${ext}$`);
         const match = entry.name.match(pattern);
         
         if (match) {
-          const timestampStr = match[2];
+          const timestampStr = match[2]!;
           const datetime = new Date(timestampStr.replace(/-/g, (m, i) => i === 19 ? '.' : i === 16 ? '-' : ':').replace(',', '.'));
           const filePath = join(this.cacheDir, entry.name);
-          const stat = Bun.file(filePath);
+          const stat = fs.statSync(filePath);
           
           files.push({ filename: entry.name, datetime, size: stat.size, isComplete: true });
         }
@@ -240,19 +242,19 @@ export class CacheManager {
     const files: CacheFileInfo[] = [];
     
     try {
-      const dirEntries = Bun.dir(this.cacheDir);
+      const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true });
       
-      for (const entry of dirEntries) {
-        if (entry.name.startsWith('.') || entry.isDirectory() || !entry.name.startsWith('_')) continue;
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || !entry.isFile() || !entry.name.startsWith('_')) continue;
 
         const pattern = new RegExp(`^_([a-zA-Z0-9_-]+)_([\\d]{4}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{2}-[\\d]{3})\\.${ext}$`);
         const match = entry.name.match(pattern);
         
         if (match) {
-          const timestampStr = match[2];
+          const timestampStr = match[2]!;
           const datetime = new Date(timestampStr.replace(/-/g, (m, i) => i === 19 ? '.' : i === 16 ? '-' : ':').replace(',', '.'));
           const filePath = join(this.cacheDir, entry.name);
-          const stat = Bun.file(filePath);
+          const stat = fs.statSync(filePath);
           
           files.push({ filename: entry.name, datetime, size: stat.size, isComplete: false });
         }
@@ -269,7 +271,7 @@ export class CacheManager {
     const tempPath = this.getTempPath(repoId, datetime, ext);
     
     try {
-      await Bun.write(tempPath, data);
+      await fs.promises.writeFile(tempPath, data);
       return tempPath;
     } catch (error) {
       console.error(`Cache: Failed to write temp file: ${error instanceof Error ? error.message : String(error)}`);
@@ -281,9 +283,8 @@ export class CacheManager {
     const tempPath = this.getTempPath(repoId, datetime, ext);
     
     try {
-      const tempFile = Bun.file(tempPath);
-      if (await tempFile.exists()) {
-        await Bun.unlink(tempPath);
+      if (fs.existsSync(tempPath)) {
+        await fs.promises.unlink(tempPath);
         console.log(`Cache: Cancelled sync for ${repoId}, deleted temp file`);
       }
       return true;
@@ -299,13 +300,13 @@ export class CacheManager {
     let tempFiles = 0;
 
     try {
-      const dirEntries = Bun.dir(this.cacheDir);
+      const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true });
       
-      for (const entry of dirEntries) {
-        if (entry.name.startsWith('.') || entry.isDirectory()) continue;
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || !entry.isFile()) continue;
 
         const filePath = join(this.cacheDir, entry.name);
-        const stat = Bun.file(filePath);
+        const stat = fs.statSync(filePath);
         
         totalFiles++;
         totalSize += stat.size;

@@ -19,7 +19,9 @@ describe('Logger', () => {
     try {
       const testFile = Bun.file(testLogPath);
       if (await testFile.exists()) {
-        await Bun.unlink(testLogPath);
+        await Bun.write(testLogPath, ''); // Clear file instead of unlink
+        const fs = await import('fs');
+        await fs.promises.unlink(testLogPath);
       }
     } catch (e) {
       // Ignore cleanup errors

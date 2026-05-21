@@ -21,10 +21,16 @@ Depends: libc6 (>= 2.34), redis-tools
     const packages = parsePackages(input);
     
     expect(packages.length).toBe(1);
-    expect(packages[0].Package).toBe('redis-server');
-    expect(packages[0].Version).toBe('6.2.1-1');
-    expect(packages[0].Architecture).toBe('amd64');
-    expect(packages[0].Depends).toBe('libc6 (>= 2.34), redis-tools');
+    const pkg = packages[0];
+    if (!pkg) throw new Error('Package not found');
+    expect(pkg.Package).toBeDefined();
+    expect(pkg.Package).toBe('redis-server');
+    expect(pkg.Version).toBeDefined();
+    expect(pkg.Version).toBe('6.2.1-1');
+    expect(pkg.Architecture).toBeDefined();
+    expect(pkg.Architecture).toBe('amd64');
+    expect(pkg.Depends).toBeDefined();
+    expect(pkg.Depends).toBe('libc6 (>= 2.34), redis-tools');
   });
 
   test('parses multiple package records', () => {
@@ -39,8 +45,13 @@ Version: 2.0
     const packages = parsePackages(input);
     
     expect(packages.length).toBe(2);
-    expect(packages[0].Package).toBe('pkg1');
-    expect(packages[1].Package).toBe('pkg2');
+    const pkg1 = packages[0];
+    const pkg2 = packages[1];
+    if (!pkg1 || !pkg2) throw new Error('Packages not found');
+    expect(pkg1.Package).toBeDefined();
+    expect(pkg1.Package).toBe('pkg1');
+    expect(pkg2.Package).toBeDefined();
+    expect(pkg2.Package).toBe('pkg2');
   });
 
   test('serializes packages back to text format', () => {
@@ -77,7 +88,7 @@ describe('Filter - Include', () => {
     const result = applyInclude(packages, rules);
     
     expect(result.length).toBe(1);
-    expect(result[0].Package).toBe('redis-server');
+    const pkg = result[0]; if (!pkg) throw new Error("Package not found"); expect(pkg.Package).toBeDefined(); expect(pkg.Package).toBe('redis-server');
   });
 
   test('include by regex pattern', () => {
@@ -85,8 +96,10 @@ describe('Filter - Include', () => {
     const result = applyInclude(packages, rules);
     
     expect(result.length).toBe(2);
-    expect(result[0].Package).toBe('redis-server');
-    expect(result[1].Package).toBe('redis-tools');
+    const pkg0 = result[0]; if (!pkg0) throw new Error("Package not found");
+    const pkg1 = result[1]; if (!pkg1) throw new Error("Package not found");
+    expect(pkg0.Package).toBe('redis-server');
+    expect(pkg1.Package).toBe('redis-tools');
   });
 
   test('include by version regex', () => {
@@ -94,8 +107,9 @@ describe('Filter - Include', () => {
     const result = applyInclude(packages, rules);
     
     expect(result.length).toBe(1);
-    expect(result[0].Package).toBe('redis-server');
-    expect(result[0].Version).toBe('6.2.1');
+    const pkg0 = result[0]; if (!pkg0) throw new Error("Package not found");
+    expect(pkg0.Package).toBe('redis-server');
+    expect(pkg0.Version).toBe('6.2.1');
   });
 
   test('include with multiple rules (OR logic)', () => {
@@ -500,10 +514,13 @@ describe('E2E - Complete Filter Pipeline', () => {
     const result = resolveDependencies(allPackages, filtered, false, false, true);
     
     // Проверки
-    const packageNames = result.packages.map(p => p.Package);
+    const packageNames = result.packages.map(p => {
+      if (!p.Package) throw new Error("Package name is undefined");
+      return p.Package;
+    });
     
     // Должен быть redis-server (последние 2 версии 6.2.x)
-    const redisServerPkgs = result.packages.filter(p => p.Package === 'redis-server' && p.Version.startsWith('6.2'));
+    const redisServerPkgs = result.packages.filter(p => p.Package === 'redis-server' && p.Version && p.Version.startsWith('6.2'));
     expect(redisServerPkgs.length).toBe(2);
     
     // Должны быть зависимости (redis-tools и libc6)

@@ -1,1 +1,13 @@
-Nothing should be ignored based on the provided file changes, as they only include source code files (.ts), documentation files (.md), and configuration files (.json). No build artifacts, dependencies, temporary files, or compiled files are present in the changes.
+```
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+
+# Environment
+.env.local
+
+# Package lock file
+package-lock.json
+```

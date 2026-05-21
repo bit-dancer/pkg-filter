@@ -1,1 +1,0 @@
-[2026-05-21T11:45:27.891Z] [ERROR] UPSTREAM http://example.com 500 100ms {"url":"http://example.com","status":500,"durationMs":100,"error":"timeout"}

@@ -24,16 +24,20 @@ describe("Dependency Parser", () => {
   test("should parse simple depends", () => {
     const deps = parseDependencies("libc6 (>= 2.31), libssl1.1");
     expect(deps).toHaveLength(2);
-    expect(deps[0].name).toBe("libc6");
-    expect(deps[0].versionOp).toBe(">=");
-    expect(deps[0].version).toBe("2.31");
+    const dep0 = deps[0]; if (!dep0) throw new Error("Dependency not found");
+    const dep1 = deps[1]; if (!dep1) throw new Error("Dependency not found");
+    expect(dep0.name).toBe("libc6");
+    expect(dep0.versionOp).toBe(">=");
+    expect(dep0.version).toBe("2.31");
   });
 
   test("should parse OR dependencies", () => {
     const deps = parseDependencies("pkg1 | pkg2");
     expect(deps).toHaveLength(2);
-    expect(deps[0].orGroup).toBe(1);
-    expect(deps[1].orGroup).toBe(1);
+    const dep0 = deps[0]; if (!dep0) throw new Error("Dependency not found");
+    const dep1 = deps[1]; if (!dep1) throw new Error("Dependency not found");
+    expect(dep0.orGroup).toBe(1);
+    expect(dep1.orGroup).toBe(1);
   });
 });
 
@@ -53,7 +57,10 @@ describe("Filter Logic", () => {
     ];
     let result = applyExclude(mockPackages, excludeRules);
     expect(result).toHaveLength(3); // Only redis-server packages
-    expect(result.some(p => p.Package.includes("doc"))).toBeFalse();
+    expect(result.some(p => {
+      if (!p.Package) return false;
+      return p.Package.includes("doc");
+    })).toBeFalse();
   });
 
   test("should keep specific versions", () => {
@@ -62,8 +69,17 @@ describe("Filter Logic", () => {
     // Should keep 7.0.0 and 6.2.2 (last 2)
     result = result.filter(p => p.Package === "redis-server");
     expect(result).toHaveLength(2);
-    expect(result.map(p => p.Version)).toContain("7.0.0");
-    expect(result.map(p => p.Version)).toContain("6.2.2");
-    expect(result.map(p => p.Version)).not.toContain("6.2.1");
+    expect(result.map(p => {
+      if (!p.Version) throw new Error("Version is undefined");
+      return p.Version;
+    })).toContain("7.0.0");
+    expect(result.map(p => {
+      if (!p.Version) throw new Error("Version is undefined");
+      return p.Version;
+    })).toContain("6.2.2");
+    expect(result.map(p => {
+      if (!p.Version) throw new Error("Version is undefined");
+      return p.Version;
+    })).not.toContain("6.2.1");
   });
 });
