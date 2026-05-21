@@ -1,40 +1,10 @@
 ```
 # Dependencies
 node_modules/
-.bun/
-
-# Logs and temp files
-*.log
-*.tmp
-
 # Environment
 .env
 .env.local
-*.env.*
-
-# Editor/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Build artifacts
-dist/
-build/
-target/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# OS
-.DS_Store
-Thumbs.db
+.env.*
+# Logs
+*.log
 ```

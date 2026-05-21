@@ -5,13 +5,13 @@
 import { Database } from 'bun:sqlite';
 import { ProxyAgent } from 'undici';
 import { join } from 'path';
-import type { RepoConfig, FilterRule } from './filter';
+import type { FilterRule } from './filter';
 import { parsePackages, serializePackages, type PackageRecord } from './parser';
-import { applyInclude, applyExclude, applyVersionKeep, resolveDependencies } from './filter';
+import { applyInclude, applyExclude, applyVersionKeep, resolveDependencies, type RepoConfig } from './filter';
 import { getDbPath, getConfigPath, validateRepoId, getTempDir, ensureDir, generateRandomFilename } from './utils/paths';
 import { CacheManager } from './utils/cache-manager';
 import { logger } from './utils/logger';
-import { unlinkSync } from 'fs';
+import { unlinkSync, existsSync } from 'fs';
 
 export interface SyncResult {
   repoId: string;
@@ -573,7 +573,8 @@ export class RepoManager {
           packagesGzPath = join(tempDir, generateRandomFilename('packages', '.gz'));
           
           // Потоково записать .gz файл во временный файл
-          const gzWriter = Bun.file(packagesGzPath).writer;
+          const gzFileForWrite = Bun.file(packagesGzPath);
+          const gzWriter = gzFileForWrite.writer();
           const reader = response.body;
           if (!reader) {
             throw new Error('Response body is null');
@@ -585,15 +586,16 @@ export class RepoManager {
           gzWriter.end();
           
           // Распаковать .gz файл во временный текстовый файл потоково
-          const gzFile = Bun.file(packagesGzPath);
-          const gzData = await gzFile.arrayBuffer();
+          const gzFileForRead = Bun.file(packagesGzPath);
+          const gzData = await gzFileForRead.arrayBuffer();
           const decompressed = Bun.gunzipSync(new Uint8Array(gzData));
           
           // Записать распакованные данные во временный файл
           await Bun.write(tempFilePath, decompressed);
         } else {
           // Для обычного Packages файла: сохранить сразу во временный файл
-          const writer = Bun.file(tempFilePath).writer;
+          const tempFile = Bun.file(tempFilePath);
+          const writer = tempFile.writer();
           const reader = response.body;
           if (!reader) {
             throw new Error('Response body is null');
@@ -610,11 +612,11 @@ export class RepoManager {
         const packages = parsePackages(content);
         
         // Очистить временные файлы после успешного парсинга
-        if (tempFilePath && Bun.file(tempFilePath).exists) {
+        if (tempFilePath && existsSync(tempFilePath)) {
           unlinkSync(tempFilePath);
           tempFilePath = null;
         }
-        if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+        if (packagesGzPath && existsSync(packagesGzPath)) {
           unlinkSync(packagesGzPath);
           packagesGzPath = null;
         }
@@ -625,11 +627,11 @@ export class RepoManager {
         const duration = Date.now() - requestStartTime;
         
         // Очистка временных файлов при ошибке
-        if (tempFilePath && Bun.file(tempFilePath).exists) {
+        if (tempFilePath && existsSync(tempFilePath)) {
           try { unlinkSync(tempFilePath); } catch {}
           tempFilePath = null;
         }
-        if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+        if (packagesGzPath && existsSync(packagesGzPath)) {
           try { unlinkSync(packagesGzPath); } catch {}
           packagesGzPath = null;
         }
@@ -661,10 +663,10 @@ export class RepoManager {
     }
     
     // Очистка временных файлов если ни один URL не сработал
-    if (tempFilePath && Bun.file(tempFilePath).exists) {
+    if (tempFilePath && existsSync(tempFilePath)) {
       try { unlinkSync(tempFilePath); } catch {}
     }
-    if (packagesGzPath && Bun.file(packagesGzPath).exists) {
+    if (packagesGzPath && existsSync(packagesGzPath)) {
       try { unlinkSync(packagesGzPath); } catch {}
     }
     

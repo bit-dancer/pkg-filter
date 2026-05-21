@@ -62,7 +62,7 @@ export function parsePackages(content: string): PackageRecord[] {
       const value = line.substring(colonIndex + 1).trim();
       
       if (currentPackage === null) {
-        currentPackage = {};
+        currentPackage = {} as PackageRecord;
       }
       currentPackage[key] = value;
     }
